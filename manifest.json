@@ -1,5 +1,5 @@
 {
-   "id": "alma-holdings-integration-for-docline",
+   "id": "tuftsuniversity/docline-update-with-nlm-alma-cloud-app",
    "title": "Alma Holdings Integration for Docline",
    "subtitle": "create an export of holdings to update and add to Docline based on merged Docline:Alma journals",
    "author": "Henry Steele, Library Technology and Faculty Information Services, Tufts Technology Services, Tufts University @2026",
