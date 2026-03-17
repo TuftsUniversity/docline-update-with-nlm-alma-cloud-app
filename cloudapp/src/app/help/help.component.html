@@ -1,158 +1,92 @@
 <div class="eca-actions">
   <button mat-flat-button color="primary" [routerLink]="['/']">
-      <mat-icon>arrow_back</mat-icon>Back
+    <mat-icon>arrow_back</mat-icon>Back
   </button>
 </div>
 
 <div class="title">
-  <h1>Help Page</h1>
+  <h1>Docline Holdings Processor</h1>
 </div>
 
-<!-- Lookup Tool Section -->
-<div>
-  <h2>Cloud App</h2>
-   This goal of this app is to take lists of material that may come from faculty email or bibliograpic metadata spreadsheets, show you what of these materials you have in your collection, and then let you use the same list, filtered as needed including for things that weren't found and use this as input to the second part of the app, the Citation Loader, to load these as citations on reading lists--automatically in batch.   The goal is to save all the time that would be assoicated with creating citations and reading lists one by one.  
-  <h2>Lookup Tool</h2>
-  The Lookup Tool is designed to search your Alma repository based on bibliographic metadata: title, author/contributor, and year. It's particularly useful for resolving issues with citations that may be missing an ISBN or contain an incorrect one.
+<div class="help-section">
 
-  <strong>Overview:</strong>
-  <div>
-      <p>The lookup tool is basically a search engine of citation data against your Alma repository, with the purpose of retrieving the MMS ID and course code for use by the citation loader.
-       It’s a title, author, and pub date search designed to overcome issues with faculty citations missing an ISBN or containing the wrong one.
-       Output lists course codes and sections to add to or create reading lists.</p>
-       <br/>
-      
-      
-          <p>You can hide unwanted titles from the input sheet, which will cause them not to be loaded into the citation loader.
-        For titlee not found in your collection, you may want to submit them for acquisition purchading. 
-       The citation loader will ignore hidden rows.</p>
-       
-       <br/>
-        <p><strong>Note that although this is outside the scope of this app, one possibility for creating the input spreadsheet the Lookup Tool uses is using an AI Tool, such as Chat GPT, with a prompt such  as this:</strong></p>
-        <table>
+  <h2>Overview</h2>
+  <p>
+    This Cloud App allows you to update Docline holdings using Alma Analytics data.
+    It compares your current Docline holdings against Alma-derived holdings and
+    generates properly formatted files for Docline upload.
+  </p>
 
-          <tr>
+  <h2>Required Inputs</h2>
 
-            <td>
-        "turn these citations into a table in an Excel spreadsheet of bibliographic metadata with Title, Author First, Author Last, Contributor First, Contributor Last, Publisher, and Year, as such metadata is available for each citation.
-
-        Add to this table 3 columns "Course Number", "Instructor Last Name", and "Course Semester" and assign all rows these values respectively " CSHD-0066 ", "Smith", "Sp24"
-        Harter, S. (2015). The Construction of the Self: Developmental and Sociocultural Foundations. Guilford Press.
-
-        Schwartz, S., Luychx, K., & Vignoles, V. L. (2011). Handbook of Identity Theory and Research. Springer.
-
-
-
-        McLean, K. & Syed, M. (2015). The Oxford Handbook of Identity Development.
-
-        
-        Santos, C. & Umaña-Taylor, A.J. (2015). (Eds.) Studying Ethnic Identity: Methodological and Conceptual Approaches Across Disciplines. American Psychological Association.
-
-
-        Erikson, E. H. (1968). Identity, youth, and crises. New York: Norton.
-      </td>
-    </tr>
-  </table>
-      
-       
-  </div>
-
-  <h3>Input Data Fields:</h3>
+  <h3>1. Alma Analytics CSV</h3>
   <ul>
-      <li>Title - Input</li>
-      <li>Author First - Input</li>
-      <li>Author Last - Input</li>
-      <li>Contributor First - Input</li>
-      <li>Contributor Last - Input</li>
-      <li>Publisher - Input</li> (this is not used in search, but it carries over as input data in results)
-      <li>Year - Input</li>
-      <li>Course Number - Input</li> (This assumes you have part of the course name that corresponds to a course catalog course identifier, that represents a course not specific to semester)
-      <li>Course Semester - Input</li>
-      <li>Instructor Last Name - Input</li>
-      <li>Format - Input</li>
+    <li>Export from Alma Analytics</li>
+    <li>Must include ISSN, Title, MMS ID, and coverage data</li>
+    <li>You may upload multiple Analytics files</li>
   </ul>
 
-  <strong>Processing:</strong>
-  <p>The Lookup Tool will query your Alma SRU endpoint and return results based on the citation metadata provided in the input fields. The results will include matching MMS and item data.  Additionally, any course-related data such as course codes and sections will be included if available.
-
-  <strong> Note you need to enable your SRU endpoint as an integration profile in Alma configurations, and including holding information.</strong></p>
-</div>
-
-<!-- Citation Loader Section -->
-<div>
-  <h2>Citation Loader</h2>
-  The Citation Loader allows you to take the cleaned-up list of citations from the Lookup Tool and load them directly into reading lists in Alma. It ensures that only the chosen citations are included in the final reading list.
-
-
-
-  <h2>Input data</h2>
+  <h3>2. Current Docline Holdings CSV</h3>
   <ul>
-    
-      <li>It needs MMS and Course Code/section, but it can include a lot of other fields like reading list section, temporary item policy, and citation type. If no reading list section is provided, it will enter citations under the "Resources" section. Course section is necessary if your course codes by themselves are not unique</li>
-      <li>Here is the list of fields the citation loader can ingest:</li>
-      <ul>
-          <li><strong>course_code</strong> or Course Code (required)</li>
-          <li><strong>course_section</strong> or Course Section (required if course code is not unique)</li>
-          <li><strong>mms_id</strong> or MMS ID (required)</li>
-          <li><strong>citation_type</strong> or Citation Type or secondary_type (this is the secondary type of the citation. The primary type for non-articles is always "Book" per Leganto)</li>
-          <li><strong>barcode</strong> (if the citation is physical and if you want it moved to the temporary reserves location defined in settings)</li>
-          <li><strong>course code</strong> (At Tufts University, where this was created, course codes uniquely identify both a course and a section. If your institution shares course codes for different sections, you can include the section ID to uniquely identify the Alma course record.  
-          <li><strong>section_info</strong> (this is the reading list section, if desired)</li>
-          <li><strong>item_policy</strong> or Item Policy (Note this has to be the item policy <strong>code</strong>.  This is the temporary item policy you want physical citations to move to as part of the temporary move. Leave blank if none are desired)</li>
-      </ul>
+    <li>Export from Docline</li>
+    <li>Must include ISSNs and coverage ranges</li>
   </ul>
+
+  <h2>What the App Does</h2>
+  <ul>
+    <li>Matches Analytics records to Docline by ISSN</li>
+    <li>Builds HOLDING and RANGE records</li>
+    <li>Normalizes and merges coverage data</li>
+    <li>Compares Alma vs Docline holdings</li>
+    <li>Outputs categorized files for Docline upload</li>
+  </ul>
+
+  <h2>Output Files</h2>
+  <ul>
+    <li><strong>Add Final</strong> – New holdings to add</li>
+    <li><strong>Update Final</strong> – DELETE + ADD replacements</li>
+    <li><strong>Full Match</strong> – No changes required</li>
+    <li><strong>Different Ranges</strong> – Coverage differences</li>
+    <li><strong>Delete Final</strong> – Remove from Docline</li>
+    <li><strong>No Dates</strong> – Missing coverage data</li>
+    <li><strong>Counts</strong> – Summary statistics</li>
+  </ul>
+
+  <h2>Update Behavior</h2>
+  <p>
+    Updates are structured as DELETE followed by ADD rows for each record.
+    These are automatically sorted to ensure proper Docline processing.
+  </p>
 
   <h2>Settings</h2>
   <ul>
-      <li>The settings page lets you configure the temporary library and location to move the physical material to, and if you want these physical citations to complete once they are successfully moved. You may not want them to complete if you haven't physically retrieved the items yet, in which case you can keep track of them in your tasks list</li>
+    <li>LIBID</li>
+    <li>Retention policy</li>
+    <li>Limited retention settings</li>
+    <li>EPUB ahead of print</li>
+    <li>Supplements</li>
+    <li>Ignore warnings</li>
   </ul>
 
-  <h2>Defaults</h2>
-  <p>Defaults are assumed for the creation of reading lists and citations except for the fields you can specify in the spreadsheet.</p>
+  <p>
+    These values are applied to all generated records.
+  </p>
 
-  <h3>Course and reading list validation</h3>
+  <h2>How to Use</h2>
+  <ol>
+    <li>Upload Analytics CSV file(s)</li>
+    <li>Upload current Docline holdings CSV</li>
+    <li>Configure settings</li>
+    <li>Click <strong>Process Files</strong></li>
+    <li>Download the ZIP output</li>
+    <li>Upload appropriate files into Docline</li>
+  </ol>
+
+  <h2>Notes</h2>
   <ul>
-      <li>Before creating a citation, this app does a course and reading list search and validates that:</li>
-      <ul>
-          <li>The course exists</li>
-          <li>The reading list exists AND</li>
-          <li>There is exactly one reading list for that course</li>
-          <li>If there are none, it creates one with defaults</li>
-          <li>If there is more than one, it errors with the message that reading list assignment is ambiguous because there is more than one reading list</li>
-      </ul>
+    <li>Best performance with smaller batches (~50–75 records)</li>
+    <li>Matching is driven by ISSN</li>
+    <li>All processing occurs in your browser</li>
   </ul>
 
-  <h3>Citation validation</h3>
-  <ul>
-      <li>Because this process is only for repository citations, the application checks that the MMS is for a valid bib record. If not, it records an error</li>
-      <li>It determines if a citation with that MMS ID is already on the reading list. This is because reserves staff might have received a request to create a citation for this reading list via email etc., but they may have added it themselves in the meantime. In this case, it will not go into update or success, or miss, but rather the intermediate status of "Skipped"</li>
-  </ul>
-
-  <h2>Use</h2>
-  <ul>
-      <li>Take the output file from the Lookup Tool part of this app, with any items that were not found filtered out.  (Hidden rows will be ignored)<br/>
-      It's probably best to limit this to 50-75 items because of the processing it's doing in browser</li>
-      
-      <li>Set settings</li>
-      <li>Pick file</li>
-      <li>Load</li>
-      <li>Wait for it to process.  This can take some time because of all the processing it is doing</li>
-      <li>At the end, the processing log shows:</li>
-      <ul>
-          <li>Number of processed entries</li>
-          <li>Number of successfully updated entries</li>
-          <li>Number of skipped entries (exists on reading list already)</li>
-          <li>Number of error entries</li>
-          <li>If all citations on each reading list were completed successfully, and all citations that were there before also have a status complete, then it will show the counts of the reading lists that were completed. If you have physical citations not complete and there are physical citations on the reading list, then that particular reading list won't complete</li>
-      </ul>
-      <li>You can also download this log</li>
-  </ul>
-
-  <p><a href="https://developers.exlibrisgroup.com/appcenter/citation-loader/">https://developers.exlibrisgroup.com/appcenter/citation-loader/</a></p>
-
-
-  <strong>Output:</strong>
-  The Citation Loader processes the selected records and loads them into Alma, creating reading lists for the specified courses and sections. You can choose which items to load from the list provided by the Lookup Tool.
-
-  <a href="https://github.com/TuftsUniversity/tufts-alma-cloudapp-citation-loader/issues" target="_blank">Open an issue</a>
 </div>
