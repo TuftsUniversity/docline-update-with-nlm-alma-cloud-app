@@ -1,20 +1,65 @@
+:host {
+  display: block;
+}
+
+.settings-page {
+  padding: 16px;
+}
+
+.settings-form {
+  max-width: 1100px;
+}
+
+.settings-card {
+  background: #fff;
+  border-radius: 8px;
+  padding: 20px 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.settings-note {
+  margin-bottom: 20px;
+  color: rgba(0, 0, 0, 0.7);
+}
+
 mat-form-field {
-    width: 100%;
-  }
-  .from.ng-invalid.ng-touched {
-    padding: 1px;
-    border: 1px solid red;
-  }
-  .check-boxs {
-    display: inline-block;
-    align-content: center;
-    align-items: center;
-    width: 100%;
-    max-width: 100%;
-  }
-  .checkbox-margin {
-    margin: 0 10px;
-  }
-  mat-checkbox {
-    align-self: center;
-  }
+  width: 100%;
+}
+
+.form-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.form-field {
+  flex: 1 1 320px;
+  min-width: 260px;
+}
+
+.single-row .form-field {
+  max-width: 540px;
+}
+
+.from.ng-invalid.ng-touched {
+  padding: 1px;
+  border: 1px solid red;
+}
+
+.check-boxs {
+  display: inline-block;
+  align-content: center;
+  align-items: center;
+  width: 100%;
+  max-width: 100%;
+}
+
+.checkbox-margin {
+  margin: 0 10px;
+}
+
+mat-checkbox {
+  align-self: center;
+}

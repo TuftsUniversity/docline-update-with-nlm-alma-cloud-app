@@ -1,9 +1,9 @@
 
-@import './app/main/main.component.theme';
+@import './app/split-issns/split-issns.component.theme';
 
 @mixin themed-styles($theme, $typography) {
     /* Include themed component mixins or theme dependent styles here */
-    @include main-component-theme($theme, $typography);
+    @include split-issns-component-theme($theme, $typography);
 }
 
 @mixin global-styles {

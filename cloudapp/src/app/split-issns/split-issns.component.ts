@@ -1,13 +1,15 @@
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
-
+import { CloudAppSettingsService } from '@exlibris/exl-cloudapp-angular-lib';
+import { AppSettings, DoclineConfig } from '../models/settings.model';
+import {SettingsComponent} from '../settings/settings.component'
 @Component({
   selector: 'app-split-issn',
   templateUrl: './split-issns.component.html',
   styleUrls: ['./split-issns.component.scss']
 })
-export class SplitIssnsComponent {
+export class SplitIssnsComponent implements OnInit {
   analyticsFiles: File[] = [];
   doclineFiles: File[] = [];
 
@@ -22,9 +24,10 @@ export class SplitIssnsComponent {
   finalRows: any[] = [];
 
   previewColumns: string[] = [];
+  config: AppSettings = this.getDefaultConfig();
 
-  doclineConfig = {
-    libid: 'YOUR_LIBID',
+  doclineConfig: DoclineConfig = {
+    libid: '',
     retention_policy: 'Permanently Retained',
     limited_retention_period: 0,
     limited_retention_type: 'Years',
@@ -33,6 +36,51 @@ export class SplitIssnsComponent {
     ignore_warnings: 'No'
   };
 
+  constructor(
+    private settingsService: CloudAppSettingsService
+  ) {}
+
+  ngOnInit(): void {
+    this.loading = true;
+
+    this.settingsService.get().subscribe({
+      next: (savedSettings: any) => {
+        this.config = {
+          ...this.getDefaultConfig(),
+          ...savedSettings,
+          doclineConfig: {
+            ...this.getDefaultConfig().doclineConfig,
+            ...(savedSettings && savedSettings.doclineConfig ? savedSettings.doclineConfig : {})
+          }
+        };
+
+        this.doclineConfig = {
+          ...this.doclineConfig,
+          ...this.config.doclineConfig
+        };
+      },
+      error: (err: any) => {
+        console.error(err);
+      },
+      complete: () => {
+        this.loading = false;
+      }
+    });
+  }
+
+  private getDefaultConfig(): AppSettings {
+    return {
+      doclineConfig: {
+        libid: '',
+        retention_policy: 'Permanently Retained',
+        limited_retention_period: 0,
+        limited_retention_type: 'Years',
+        has_epub_ahead_of_print: 'No',
+        has_supplements: 'No',
+        ignore_warnings: 'No'
+      }
+    };
+  }
   private readonly DOCLINE_COLUMNS: string[] = [
     'action',
     'record_type',

@@ -1,28 +1,13 @@
-export class Settings {
+export interface DoclineConfig {
+  libid: string;
+  retention_policy: string;
+  limited_retention_period: number;
+  limited_retention_type: string;
+  has_epub_ahead_of_print: string;
+  has_supplements: string;
+  ignore_warnings: string;
+}
 
-    library: string = "";
-    location: string = "";
-    isChecked: boolean = false;
-    moveRequested: boolean = true;
-    autoSkipUser: boolean = true;
-    pub_status: string = "";
-    visibility: string = "";
-    //showValue: boolean = false;
-    
-  }
-
-  // settings.model.ts
-
-export interface Settings {
-    // Already existing settings properties...
-  
-    coursePattern?: string;
-    useLegacyMapping?: boolean;
-    manualCourseEntry?: boolean;
-    semesterMappings?: {
-      [key: string]: string;  // e.g., { "Spring": "2", "Summer": "5" }
-    };
-  }
-
-
-  
+export interface AppSettings {
+  doclineConfig: DoclineConfig;
+}

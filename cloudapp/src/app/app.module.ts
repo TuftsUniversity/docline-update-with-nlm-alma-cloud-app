@@ -16,17 +16,21 @@ import { MatIconModule } from '@angular/material/icon';
 import { AppComponent } from './app.component';
 import { AppRoutingModule } from './app-routing.module';
 import { SplitIssnsComponent } from './split-issns/split-issns.component';
-
+//import { BrowserModule } from '@angular/platform-browser';
+import { CommonModule } from '@angular/common';
+import { SettingsComponent } from './settings/settings.component';
 
 
 @NgModule({
   declarations: [
     AppComponent,
-    SplitIssnsComponent
+    SplitIssnsComponent,
+    SettingsComponent
   ],
   imports: [
     MaterialModule,
     BrowserModule,
+    CommonModule,
     BrowserAnimationsModule,
     AppRoutingModule,
     HttpClientModule,
