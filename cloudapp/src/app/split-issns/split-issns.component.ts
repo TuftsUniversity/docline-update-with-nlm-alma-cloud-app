@@ -558,6 +558,7 @@ export class SplitIssnsComponent implements OnInit {
           merged['NLM_Unique_ID'] = merged['nlm_unique_id'];
           merged['ISSN_x'] = merged['ISSN'];
           merged['Title_x'] = merged['Title'];
+          merged['docline_issns_full'] = this.safeString(rightRow['issns']);
 
           merged['_match_source'] = matchSource;
           merged['_matched_on_left'] = leftKey;
@@ -606,7 +607,9 @@ export class SplitIssnsComponent implements OnInit {
         'end_volume': null,
         'begin_year': '',
         'end_year': '',
-        'issns': this.safeString(row['ISSN_x']).replace(/;/g, ','),
+        'issns': this.hasValue(row['docline_issns_full'])
+          ? this.safeString(row['docline_issns_full'])
+          : this.safeString(row['ISSN_x']).replace(/;/g, ','),
         'currently_received': this.computeCurrentlyReceived(holdingsFormat, covCombined),
         'retention_policy': this.doclineConfig.retention_policy,
         'limited_retention_period': this.doclineConfig.limited_retention_period,
@@ -652,7 +655,9 @@ export class SplitIssnsComponent implements OnInit {
               'end_volume': null,
               'begin_year': pair.beginYear,
               'end_year': pair.endYear,
-              'issns': this.safeString(row['ISSN_x']).replace(/;/g, ','),
+              'issns': this.hasValue(row['docline_issns_full'])
+                ? this.safeString(row['docline_issns_full'])
+                : this.safeString(row['ISSN_x']).replace(/;/g, ','),
               'currently_received': pair.endYear === null ? 'Yes' : 'No',
               'retention_policy': this.doclineConfig.retention_policy,
               'limited_retention_period': this.doclineConfig.limited_retention_period,
@@ -683,7 +688,9 @@ export class SplitIssnsComponent implements OnInit {
             'end_volume': electronicRange.endVolume,
             'begin_year': electronicRange.beginYear,
             'end_year': electronicRange.endYear,
-            'issns': this.safeString(row['ISSN_x']).replace(/;/g, ','),
+            'issns': this.hasValue(row['docline_issns_full'])
+              ? this.safeString(row['docline_issns_full'])
+              : this.safeString(row['ISSN_x']).replace(/;/g, ','),
             'currently_received': /until/i.test(covCombined) ? 'No' : 'Yes',
             'retention_policy': this.doclineConfig.retention_policy,
             'limited_retention_period': this.doclineConfig.limited_retention_period,
@@ -936,7 +943,14 @@ export class SplitIssnsComponent implements OnInit {
       const almaSignature = this.buildRangeSignature(almaRows);
       const doclineSignature = this.buildRangeSignature(doclineRows);
 
-      if (almaSignature === doclineSignature) {
+      const issnsCompatible =
+        almaRows.length === doclineRows.length &&
+        almaRows.every((almaRow: any, idx: number) => {
+          const doclineRow = doclineRows[idx];
+          return this.issnSetsCompatible(almaRow['issns'], doclineRow['issns']);
+        });
+
+      if (almaSignature === doclineSignature && issnsCompatible) {
         Array.prototype.push.apply(fullMatchRows, almaRows);
         return;
       }
@@ -981,6 +995,10 @@ export class SplitIssnsComponent implements OnInit {
         row['action'] = 'DELETE';
       } else {
         row['action'] = 'ADD';
+
+        if (this.safeString(row['end_year']) === '0' || row['end_year'] === 0) {
+          row['end_year'] = '';
+        }
       }
 
       delete row['_update_source'];
@@ -1084,43 +1102,93 @@ export class SplitIssnsComponent implements OnInit {
     return grouped;
   }
 
-  private buildRangeSignature(rows: any[]): string {
-    const normalized = rows
-      .map((row: any) => ({
-        record_type: this.safeString(row['record_type']),
-        begin_volume: this.safeString(row['begin_volume']),
-        end_volume: this.safeString(row['end_volume']),
-        begin_year: this.safeString(row['begin_year']),
-        end_year: this.safeString(row['end_year']),
-        embargo_period: this.safeString(row['embargo_period']),
-        currently_received: this.safeString(row['currently_received'])
-      }))
-      .sort((a: any, b: any) => {
-        const aKey = [
-          a.record_type,
-          a.begin_volume,
-          a.end_volume,
-          a.begin_year,
-          a.end_year,
-          a.embargo_period,
-          a.currently_received
-        ].join('||');
+  private issnSetsCompatible(almaIssns: any, doclineIssns: any): boolean {
+  const normalize = (value: any): string[] => {
+    return this.safeString(value)
+      .split(',')
+      .map((v: string) => v.replace(/\s*\((Print|Electronic)\)\s*/gi, '').trim())
+      .filter((v: string) => !!v)
+      .sort();
+  };
 
-        const bKey = [
-          b.record_type,
-          b.begin_volume,
-          b.end_volume,
-          b.begin_year,
-          b.end_year,
-          b.embargo_period,
-          b.currently_received
-        ].join('||');
+  const alma = normalize(almaIssns);
+  const docline = normalize(doclineIssns);
 
-        return aKey.localeCompare(bKey);
-      });
-
-    return JSON.stringify(normalized);
+  if (!alma.length && !docline.length) {
+    return true;
   }
+
+  let i = 0;
+  for (i = 0; i < alma.length; i++) {
+    if (docline.indexOf(alma[i]) === -1) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+
+private normalizeIssnsForCompare(value: any): string {
+  const raw = this.safeString(value);
+
+  if (!raw) {
+    return '';
+  }
+
+  const parts = raw
+    .split(',')
+    .map((v: string) => v.replace(/\s*\((Print|Electronic)\)\s*/gi, '').trim())
+    .filter((v: string) => !!v)
+    .sort();
+
+  return parts.join(',');
+}
+private buildRangeSignature(rows: any[]): string {
+  const normalized = rows
+    .map((row: any) => ({
+      record_type: this.safeString(row['record_type']),
+      begin_volume: this.safeString(row['begin_volume']),
+      end_volume: this.safeString(row['end_volume']),
+      begin_year: this.normalizeCompareYear(row['begin_year']),
+      end_year: this.normalizeCompareYear(row['end_year']),
+      embargo_period: this.safeString(row['embargo_period']),
+      currently_received: this.safeString(row['currently_received']),
+      holdings_format: this.safeString(row['holdings_format']),
+      // compare on normalized ISSN set, not literal string
+      issns: this.normalizeIssnsForCompare(row['issns'])
+    }))
+    .sort((a: any, b: any) => {
+      const aKey = [
+        a.record_type,
+        a.begin_volume,
+        a.end_volume,
+        a.begin_year,
+        a.end_year,
+        a.embargo_period,
+        a.currently_received,
+        a.holdings_format,
+        a.issns
+      ].join('||');
+
+      const bKey = [
+        b.record_type,
+        b.begin_volume,
+        b.end_volume,
+        b.begin_year,
+        b.end_year,
+        b.embargo_period,
+        b.currently_received,
+        b.holdings_format,
+        b.issns
+      ].join('||');
+
+      return aKey.localeCompare(bKey);
+    });
+
+  return JSON.stringify(normalized);
+}
+
 
   private shouldDeleteDoclineOnlyRows(
     rows: any[],
@@ -1135,44 +1203,82 @@ export class SplitIssnsComponent implements OnInit {
     return false;
   }
 
-  private applyFinalActionAndPrefix(rows: any[], action: string): void {
-    rows.forEach((row: any) => {
-      const nlm = this.safeString(row['nlm_unique_id']).replace(/^NLM_/, '');
+private applyFinalActionAndPrefix(rows: any[], action: string): void {
+  rows.forEach((row: any) => {
+    const nlm = this.safeString(row['nlm_unique_id']).replace(/^NLM_/, '');
 
-      if (nlm) {
-        row['nlm_unique_id'] = 'NLM_' + nlm;
+    if (nlm) {
+      row['nlm_unique_id'] = 'NLM_' + nlm;
+    }
+
+    row['action'] = action;
+
+    // 🔥 FIX: blank out end_year for ADD rows if it is "0"
+    if (action === 'ADD') {
+      if (this.safeString(row['end_year']) === '0' || row['end_year'] === 0) {
+        row['end_year'] = '';
       }
+    }
+  });
+}
+ 
 
-      row['action'] = action;
-    });
-  }
+private sortFinalRows(rows: any[]): void {
+  rows.sort((a: any, b: any) => {
+    const serialTitleCompare = this.safeString(a['serial_title']).localeCompare(
+      this.safeString(b['serial_title'])
+    );
 
-  private sortFinalRows(rows: any[]): void {
-    rows.sort((a: any, b: any) => {
-      const aKey = [
-        this.safeString(a['serial_title']),
-        this.safeString(a['nlm_unique_id']),
-        this.safeString(a['action']),
-        this.safeString(a['record_type']),
-        this.safeString(a['embargo_period']),
-        this.safeString(a['begin_year']),
-        this.safeString(a['end_year'])
-      ].join('||');
+    if (serialTitleCompare !== 0) {
+      return serialTitleCompare;
+    }
 
-      const bKey = [
-        this.safeString(b['serial_title']),
-        this.safeString(b['nlm_unique_id']),
-        this.safeString(b['action']),
-        this.safeString(b['record_type']),
-        this.safeString(b['embargo_period']),
-        this.safeString(b['begin_year']),
-        this.safeString(b['end_year'])
-      ].join('||');
+    const nlmCompare = this.safeString(a['nlm_unique_id']).localeCompare(
+      this.safeString(b['nlm_unique_id'])
+    );
 
-      return aKey.localeCompare(bKey);
-    });
-  }
+    if (nlmCompare !== 0) {
+      return nlmCompare;
+    }
 
+    // third sort key, reverse alphabetical
+    const actionCompare = this.safeString(b['action']).localeCompare(
+      this.safeString(a['action'])
+    );
+
+    if (actionCompare !== 0) {
+      return actionCompare;
+    }
+
+    const recordTypeCompare = this.safeString(a['record_type']).localeCompare(
+      this.safeString(b['record_type'])
+    );
+
+    if (recordTypeCompare !== 0) {
+      return recordTypeCompare;
+    }
+
+    const embargoCompare = this.safeString(a['embargo_period']).localeCompare(
+      this.safeString(b['embargo_period'])
+    );
+
+    if (embargoCompare !== 0) {
+      return embargoCompare;
+    }
+
+    const beginYearCompare = this.safeString(a['begin_year']).localeCompare(
+      this.safeString(b['begin_year'])
+    );
+
+    if (beginYearCompare !== 0) {
+      return beginYearCompare;
+    }
+
+    return this.safeString(a['end_year']).localeCompare(
+      this.safeString(b['end_year'])
+    );
+  });
+}
   private normalizeForFinalOutput(rows: any[]): any[] {
     const dropCols = new Set([
       'libid',
