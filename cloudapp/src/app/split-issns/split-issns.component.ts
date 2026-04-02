@@ -22,6 +22,7 @@ export class SplitIssnsComponent implements OnInit {
   mergedRows: any[] = [];
   convertedRows: any[] = [];
   finalRows: any[] = [];
+  coverageParseErrorRows: any[] = [];
 
   previewColumns: string[] = [];
   config: AppSettings = this.getDefaultConfig();
@@ -152,6 +153,7 @@ export class SplitIssnsComponent implements OnInit {
     this.convertedRows = [];
     this.finalRows = [];
     this.previewColumns = [];
+    this.coverageParseErrorRows = [];
 
     try {
       let analyticsRawRows: any[] = [];
@@ -233,10 +235,13 @@ export class SplitIssnsComponent implements OnInit {
 
       this.statusMessage = 'Building ZIP package...';
 
-      const zipBlob = await this.buildOutputZip(
-        inferredChoice,
-        classified
-      );
+const zipBlob = await this.buildOutputZip(
+  inferredChoice,
+  {
+    ...classified,
+    coverageParseErrorRows: this.coverageParseErrorRows
+  }
+);
 
       this.statusMessage = 'Downloading ZIP package...';
       this.downloadZipLocally(zipBlob, `${inferredChoice}_Docline_Output.zip`);
@@ -254,6 +259,34 @@ export class SplitIssnsComponent implements OnInit {
     const hasCoverage = rows.some((row: any) => this.hasValue(row['Coverage Information Combined']));
     return hasCoverage ? 'Electronic' : 'Print';
   }
+
+  private buildCoverageParseErrorRow(row: any, coverage: string, holdingsFormat: string): any {
+  return {
+    action: '',
+    record_type: 'ERROR',
+    serial_title: row['Title_x'],
+    nlm_unique_id: row['NLM_Unique_ID'],
+    holdings_format: holdingsFormat,
+    begin_volume: '',
+    end_volume: '',
+    begin_year: '',
+    end_year: '',
+    issns: this.hasValue(row['docline_issns_full'])
+      ? this.safeString(row['docline_issns_full'])
+      : this.safeString(row['ISSN_x']).replace(/;/g, ','),
+    currently_received: '',
+    retention_policy: this.doclineConfig.retention_policy,
+    limited_retention_period: this.doclineConfig.limited_retention_period,
+    limited_retention_type: this.doclineConfig.limited_retention_type,
+    embargo_period: 0,
+    has_epub_ahead_of_print: this.doclineConfig.has_epub_ahead_of_print,
+    has_supplements: this.doclineConfig.has_supplements,
+    ignore_warnings: this.doclineConfig.ignore_warnings,
+    last_modified: '',
+    coverage_statement: coverage,
+    error_message: 'Could not derive any non-missing print date range from holdings summary'
+  };
+}
 
   private async readCsvFile(file: File): Promise<any[]> {
     return new Promise((resolve, reject) => {
@@ -639,39 +672,46 @@ export class SplitIssnsComponent implements OnInit {
         const year = this.safeInt(embargoYears[idx], 0);
         const embargoPeriod = choice === 'Electronic' ? (month ? month : year * 12) : 0;
 
-        if (holdingsFormat === 'Print' && this.looksLikePhysicalStatement(coverage)) {
-          const ranges = this.parsePhysicalRanges(coverage);
+      if (holdingsFormat === 'Print' && this.looksLikePhysicalStatement(coverage)) {
+        const ranges = this.parsePhysicalRanges(coverage);
 
-          ranges.forEach((pair: any) => {
-            rangeRows.push({
-              'Bibliographic Lifecycle': row['Lifecycle'],
-              'action': '',
-              'record_type': 'RANGE',
-              'libid': this.doclineConfig.libid,
-              'serial_title': row['Title_x'],
-              'nlm_unique_id': row['NLM_Unique_ID'],
-              'holdings_format': holdingsFormat,
-              'begin_volume': null,
-              'end_volume': null,
-              'begin_year': pair.beginYear,
-              'end_year': pair.endYear,
-              'issns': this.hasValue(row['docline_issns_full'])
-                ? this.safeString(row['docline_issns_full'])
-                : this.safeString(row['ISSN_x']).replace(/;/g, ','),
-              'currently_received': pair.endYear === null ? 'Yes' : 'No',
-              'retention_policy': this.doclineConfig.retention_policy,
-              'limited_retention_period': this.doclineConfig.limited_retention_period,
-              'limited_retention_type': this.doclineConfig.limited_retention_type,
-              'embargo_period': embargoPeriod,
-              'has_epub_ahead_of_print': this.doclineConfig.has_epub_ahead_of_print,
-              'has_supplements': this.doclineConfig.has_supplements,
-              'ignore_warnings': this.doclineConfig.ignore_warnings,
-              'last_modified': ''
-            });
-          });
-
+        if (!ranges.length) {
+          this.coverageParseErrorRows.push(
+            this.buildCoverageParseErrorRow(row, coverage, holdingsFormat)
+          );
           return;
         }
+
+        ranges.forEach((pair: any) => {
+          rangeRows.push({
+            'Bibliographic Lifecycle': row['Lifecycle'],
+            'action': '',
+            'record_type': 'RANGE',
+            'libid': this.doclineConfig.libid,
+            'serial_title': row['Title_x'],
+            'nlm_unique_id': row['NLM_Unique_ID'],
+            'holdings_format': holdingsFormat,
+            'begin_volume': null,
+            'end_volume': null,
+            'begin_year': pair.beginYear,
+            'end_year': pair.endYear,
+            'issns': this.hasValue(row['docline_issns_full'])
+              ? this.safeString(row['docline_issns_full'])
+              : this.safeString(row['ISSN_x']).replace(/;/g, ','),
+            'currently_received': pair.endYear === null ? 'Yes' : 'No',
+            'retention_policy': this.doclineConfig.retention_policy,
+            'limited_retention_period': this.doclineConfig.limited_retention_period,
+            'limited_retention_type': this.doclineConfig.limited_retention_type,
+            'embargo_period': embargoPeriod,
+            'has_epub_ahead_of_print': this.doclineConfig.has_epub_ahead_of_print,
+            'has_supplements': this.doclineConfig.has_supplements,
+            'ignore_warnings': this.doclineConfig.ignore_warnings,
+            'last_modified': ''
+          });
+        });
+
+        return;
+      }
 
         const electronicRange = this.parseElectronicCoverage(coverage);
 
@@ -1404,6 +1444,7 @@ private sortFinalRows(rows: any[]): void {
       inDoclineOnlyPreserveRows: any[];
       noDatesRows: any[];
       countsRows: any[];
+      coverageParseErrorRows: any[];
     }
   ): Promise<Blob> {
     const zip = new JSZip();
@@ -1413,6 +1454,35 @@ private sortFinalRows(rows: any[]): void {
       throw new Error('Could not create Output folder in ZIP.');
     }
 
+    outputFolder.file(
+  `${choice} Coverage Parse Errors.csv`,
+  this.rowsToCsv(
+    outputSets.coverageParseErrorRows,
+    [
+      'action',
+      'record_type',
+      'serial_title',
+      'nlm_unique_id',
+      'holdings_format',
+      'begin_volume',
+      'end_volume',
+      'begin_year',
+      'end_year',
+      'issns',
+      'currently_received',
+      'retention_policy',
+      'limited_retention_period',
+      'limited_retention_type',
+      'embargo_period',
+      'has_epub_ahead_of_print',
+      'has_supplements',
+      'ignore_warnings',
+      'last_modified',
+      'coverage_statement',
+      'error_message'
+    ]
+  )
+);
     outputFolder.file(
       `${choice} Add Final.csv`,
       this.rowsToCsv(this.projectDoclineColumns(outputSets.addRows), this.DOCLINE_COLUMNS)
@@ -1464,7 +1534,7 @@ private sortFinalRows(rows: any[]): void {
     return await zip.generateAsync({
       type: 'blob'
     });
-  }
+  } 
 
   private async uploadZipToServer(
     zipBlob: Blob,
@@ -1545,49 +1615,81 @@ private sortFinalRows(rows: any[]): void {
   }
 
   private parsePhysicalRanges(statement: string): any[] {
-    if (!statement) {
-      return [];
-    }
-
-    const segments = statement
-      .split(/;\s*/)
-      .map((s: string) => s.trim())
-      .filter((s: string) => !!s);
-
-    const ranges: any[] = [];
-
-    segments.forEach((segment: string) => {
-      let seg = segment.replace(/^\s*Missing:\s*/i, '');
-
-      if (seg.indexOf('-') > -1) {
-        const pieces = seg.split('-', 2);
-        const left = pieces[0];
-        const right = pieces[1] || '';
-
-        const beginYear = this.extractYear(left);
-        let endYear = this.extractYear(right);
-
-        const openEnded = right.trim() === '' || /-\s*$/.test(seg);
-
-        if (openEnded) {
-          endYear = null;
-        }
-
-        if (beginYear) {
-          ranges.push({ beginYear, endYear });
-        }
-      } else {
-        const y = this.extractYear(seg);
-
-        if (y) {
-          ranges.push({ beginYear: y, endYear: y });
-        }
-      }
-    });
-
-    return this.dedupeByKey(ranges, ['beginYear', 'endYear']);
+  if (!statement) {
+    return [];
   }
 
+  const segments = statement
+    .split(/;\s*/)
+    .map((s: string) => s.trim())
+    .filter((s: string) => !!s);
+
+  const positiveSegments: string[] = [];
+  let inMissingBlock = false;
+
+  segments.forEach((rawSegment: string) => {
+    let seg = rawSegment.trim();
+
+    if (/^Missing:\s*/i.test(seg)) {
+      inMissingBlock = true;
+      seg = seg.replace(/^Missing:\s*/i, '').trim();
+    }
+
+    const hasYear = !!this.extractYear(seg);
+
+    // While we're in a Missing block, skip issue/volume fragments that have no year.
+    // The first segment with a year is treated as the first real holdings segment.
+    if (inMissingBlock) {
+      if (!hasYear) {
+        return;
+      }
+      inMissingBlock = false;
+    }
+
+    if (seg) {
+      positiveSegments.push(seg);
+    }
+  });
+
+  if (!positiveSegments.length) {
+    return [];
+  }
+
+  const ranges: any[] = [];
+
+  positiveSegments.forEach((seg: string) => {
+    if (seg.indexOf('-') > -1) {
+      const pieces = seg.split('-', 2);
+      const left = pieces[0];
+      const right = pieces[1] || '';
+
+      const beginYear = this.extractYear(left);
+      let endYear = this.extractYear(right);
+
+      const openEnded = right.trim() === '' || /-\s*$/.test(seg);
+      if (openEnded) {
+        endYear = null;
+      }
+
+      if (beginYear) {
+        ranges.push({
+          beginYear: beginYear,
+          endYear: endYear
+        });
+      }
+    } else {
+      const y = this.extractYear(seg);
+      if (y) {
+        ranges.push({
+          beginYear: y,
+          endYear: y
+        });
+      }
+    }
+  });
+
+  return this.dedupeByKey(ranges, ['beginYear', 'endYear']);
+}
   private computeCurrentlyReceived(
     holdingsFormat: string,
     coverageCombined: string

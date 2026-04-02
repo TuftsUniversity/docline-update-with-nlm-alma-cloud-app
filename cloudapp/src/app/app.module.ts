@@ -16,16 +16,16 @@ import { MatIconModule } from '@angular/material/icon';
 import { AppComponent } from './app.component';
 import { AppRoutingModule } from './app-routing.module';
 import { SplitIssnsComponent } from './split-issns/split-issns.component';
-//import { BrowserModule } from '@angular/platform-browser';
 import { CommonModule } from '@angular/common';
 import { SettingsComponent } from './settings/settings.component';
-
+import { HelpComponent } from './help/help.component';
 
 @NgModule({
   declarations: [
     AppComponent,
     SplitIssnsComponent,
-    SettingsComponent
+    SettingsComponent,
+    HelpComponent
   ],
   imports: [
     MaterialModule,
@@ -41,14 +41,6 @@ import { SettingsComponent } from './settings/settings.component';
     MatIconModule,
     CloudAppTranslateModule.forRoot()
   ],
-//   providers: [
-//     {
-//       provide: APP_INITIALIZER,
-//       deps: [InitService],
-//       multi: true
-//     },
-//     { provide: MAT_FORM_FIELD_DEFAULT_OPTIONS, useValue: { appearance: 'standard' } }
-//   ],
   bootstrap: [AppComponent]
 })
 export class AppModule { }

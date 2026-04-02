@@ -1,8 +1,9 @@
-<div class="eca-actions">
-  <button mat-flat-button color="primary" [routerLink]="['/']">
-    <mat-icon>arrow_back</mat-icon>Back
-  </button>
-</div>
+    <div class="eca-actions">
+      <a [routerLink]="['']" style="float: right">
+         <button mat-flat-button color="secondary">
+          <mat-icon>arrow_back</mat-icon>Back
+        </button>
+      </a>
 
 <div class="title">
   <h1>Docline Holdings Processor</h1>
@@ -21,7 +22,7 @@
 
   <h3>1. Alma Analytics CSV</h3>
   <ul>
-    <li>Export from Alma Analytics</li>
+    <li>Export from Alma Analytics.  Use 	"/shared/Community/Reports/Institutions/Tufts University/Electronic Journals for NLM-Docline" input file from Analtyics and 	"/shared/Community/Reports/Institutions/Tufts University/Print Journals - for NLM-Docline" for your print journals.  The output just has to have these columns so you can modify the contents or filters.  Note that the electronic journals are limited by those available to ILL, but the other report against which this is filtered uses the "ILL Allowed" field that Tufts University uses to determine ILL lendability.  So this may be different for your institution.  In this case you can alter your filter reports accordingly, or simply in the report you upload, hard code the value of this field to "ILL Allowed" by changing the formula in your version of the Analtyics report. </li>
     <li>Must include ISSN, Title, MMS ID, and coverage data</li>
     <li>You may upload multiple Analytics files</li>
   </ul>
@@ -43,11 +44,11 @@
 
   <h2>Output Files</h2>
   <ul>
-    <li><strong>Add Final</strong> – New holdings to add</li>
-    <li><strong>Update Final</strong> – DELETE + ADD replacements</li>
+    <li><strong>Add Final</strong> – New holdings to add:<strong> Upload to Docline</strong></li>
+    <li><strong>Update Final</strong> – DELETE + ADD replacements: <strong>Upload to Docline</strong></li>
     <li><strong>Full Match</strong> – No changes required</li>
     <li><strong>Different Ranges</strong> – Coverage differences</li>
-    <li><strong>Delete Final</strong> – Remove from Docline</li>
+    <li><strong>Delete Final</strong> – Remove from Docline: <strong>Upload to Docline</strong></li>
     <li><strong>No Dates</strong> – Missing coverage data</li>
     <li><strong>Counts</strong> – Summary statistics</li>
   </ul>
