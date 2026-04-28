@@ -1000,27 +1000,29 @@ const zipBlob = await this.buildOutputZip(
       Array.prototype.push.apply(differentRangesAlmaRows, almaRows);
       Array.prototype.push.apply(differentRangesDoclineRows, doclineRows);
 
-      const almaMissingDates = almaRows.filter((row: any) =>
-        this.safeString(row['record_type']) === 'RANGE' &&
-        !this.hasValue(row['begin_year'])
-      );
-      if (almaMissingDates.length > 0) {
-        Array.prototype.push.apply(noDatesRows, almaMissingDates);
-      } else {
-        almaRows.forEach((row: any) => {
-          const cloned = this.cloneRow(row);
-          cloned['_update_source'] = 'ALMA';
-          updateRows.push(cloned);
-        });
+    const almaRangeRows = almaRows.filter((row: any) =>
+      this.safeString(row['record_type']) === 'RANGE'
+    );
 
-        doclineRows.forEach((row: any) => {
-          const cloned = this.cloneRow(row);
-          cloned['_update_source'] = 'DOCLINE';
-          updateRows.push(cloned);
-        });
-      }
-    });
+    const almaMissingDates = almaRangeRows.filter((row: any) =>
+      !this.hasValue(row['begin_year'])
+    );
 
+    if (almaRangeRows.length === 0 || almaMissingDates.length > 0) {
+      Array.prototype.push.apply(noDatesRows, almaRows);
+    } else {
+      almaRows.forEach((row: any) => {
+        const cloned = this.cloneRow(row);
+        cloned['_update_source'] = 'ALMA';
+        updateRows.push(cloned);
+      });
+
+      doclineRows.forEach((row: any) => {
+        const cloned = this.cloneRow(row);
+        cloned['_update_source'] = 'DOCLINE';
+        updateRows.push(cloned);
+      });
+    }
     this.applyFinalActionAndPrefix(addRows, 'ADD');
     this.applyFinalActionAndPrefix(fullMatchRows, 'ADD');
     this.applyFinalActionAndPrefix(differentRangesAlmaRows, 'ADD');
