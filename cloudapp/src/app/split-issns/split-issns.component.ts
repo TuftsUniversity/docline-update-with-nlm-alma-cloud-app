@@ -530,10 +530,15 @@ const zipBlob = await this.buildOutputZip(
   private normalizeCompareYear(value: any): string {
     const s = this.safeString(value);
     if (!s || s === '<NA>') {
-      return '0';
+      return '';
     }
     return s;
+
+
+
   }
+
+
 
   private buildIndex(rows: any[], keyName: string): Map<string, any[]> {
     const index = new Map<string, any[]>();
@@ -1331,11 +1336,25 @@ private sortFinalRows(rows: any[]): void {
     return rows.map((row: any) => {
       const cleaned: any = {};
 
+      // Object.keys(row).forEach((key: string) => {
+      //   const trimmed = String(key).trim();
+
+      //   if (!dropCols.has(trimmed)) {
+      //     cleaned[trimmed] = row[key];
+      //   }
+      // });
+
       Object.keys(row).forEach((key: string) => {
         const trimmed = String(key).trim();
 
         if (!dropCols.has(trimmed)) {
-          cleaned[trimmed] = row[key];
+          let value = row[key];
+
+          if (trimmed === 'end_year' && (value === '0' || value === 0)) {
+            value = '';
+          }
+
+          cleaned[trimmed] = value;
         }
       });
 
