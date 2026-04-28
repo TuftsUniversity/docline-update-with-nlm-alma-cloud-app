@@ -530,12 +530,9 @@ const zipBlob = await this.buildOutputZip(
   private normalizeCompareYear(value: any): string {
     const s = this.safeString(value);
     if (!s || s === '<NA>') {
-      return '';
+      return '0';   // <-- restore for comparison only
     }
     return s;
-
-
-
   }
 
 
