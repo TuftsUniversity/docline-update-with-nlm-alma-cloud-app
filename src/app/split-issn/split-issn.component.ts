@@ -1004,12 +1004,13 @@ const zipBlob = await this.buildOutputZip(
       this.safeString(row['record_type']) === 'RANGE'
     );
 
-    const almaMissingDates = almaRangeRows.filter((row: any) =>
+    const almaMissingDates = almaRows.filter((row: any) =>
+      this.safeString(row['record_type']) === 'RANGE' &&
       !this.hasValue(row['begin_year'])
     );
 
-    if (almaRangeRows.length === 0 || almaMissingDates.length > 0) {
-      Array.prototype.push.apply(noDatesRows, almaRows);
+    if (almaMissingDates.length > 0) {
+      Array.prototype.push.apply(noDatesRows, almaMissingDates);
     } else {
       almaRows.forEach((row: any) => {
         const cloned = this.cloneRow(row);
