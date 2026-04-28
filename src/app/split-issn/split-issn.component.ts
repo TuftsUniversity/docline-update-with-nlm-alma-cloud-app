@@ -965,9 +965,9 @@ const zipBlob = await this.buildOutputZip(
       const doclineRows = doclineByKey[key] || [];
 
       if (almaRows.length > 0 && doclineRows.length === 0) {
-  Array.prototype.push.apply(addRows, almaRows);
-  return;
-}
+        Array.prototype.push.apply(addRows, almaRows);
+        return;
+      }
 
       if (almaRows.length === 0 && doclineRows.length > 0) {
         const shouldDelete = this.shouldDeleteDoclineOnlyRows(doclineRows, choice);
