@@ -1004,8 +1004,7 @@ const zipBlob = await this.buildOutputZip(
       this.safeString(row['record_type']) === 'RANGE'
     );
 
-    const almaMissingDates = almaRows.filter((row: any) =>
-      this.safeString(row['record_type']) === 'RANGE' &&
+    const almaMissingDates = almaRangeRows.filter((row: any) =>
       !this.hasValue(row['begin_year'])
     );
 
@@ -1024,6 +1023,7 @@ const zipBlob = await this.buildOutputZip(
         updateRows.push(cloned);
       });
     }
+    });
     this.applyFinalActionAndPrefix(addRows, 'ADD');
     this.applyFinalActionAndPrefix(fullMatchRows, 'ADD');
     this.applyFinalActionAndPrefix(differentRangesAlmaRows, 'ADD');
