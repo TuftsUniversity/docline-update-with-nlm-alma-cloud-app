@@ -1004,25 +1004,25 @@ const zipBlob = await this.buildOutputZip(
       this.safeString(row['record_type']) === 'RANGE'
     );
 
-    const almaMissingDates = almaRangeRows.filter((row: any) =>
-      !this.hasValue(row['begin_year'])
+    const almaValidRangeRows = almaRangeRows.filter((row: any) =>
+      this.hasValue(row['begin_year'])
     );
 
-    if (almaMissingDates.length > 0) {
-      Array.prototype.push.apply(noDatesRows, almaMissingDates);
-    } else {
-      almaRows.forEach((row: any) => {
-        const cloned = this.cloneRow(row);
-        cloned['_update_source'] = 'ALMA';
-        updateRows.push(cloned);
-      });
-
-      doclineRows.forEach((row: any) => {
-        const cloned = this.cloneRow(row);
-        cloned['_update_source'] = 'DOCLINE';
-        updateRows.push(cloned);
-      });
+    if (almaValidRangeRows.length === 0) {
+      Array.prototype.push.apply(noDatesRows, almaRows);
+      return;
     }
+
+    almaRows.forEach((row: any) => {
+      const cloned = this.cloneRow(row);
+      cloned['_update_source'] = 'ALMA';
+      updateRows.push(cloned);
+    });
+
+    doclineRows.forEach((row: any) => {
+      const cloned = this.cloneRow(row);
+      cloned['_update_source'] = 'DOCLINE';
+      updateRows.push(cloned);
     });
     this.applyFinalActionAndPrefix(addRows, 'ADD');
     this.applyFinalActionAndPrefix(fullMatchRows, 'ADD');
