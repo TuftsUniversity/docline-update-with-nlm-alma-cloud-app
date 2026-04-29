@@ -3,9 +3,9 @@ import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import { CloudAppSettingsService } from '@exlibris/exl-cloudapp-angular-lib';
 import { AppSettings, DoclineConfig } from '../models/settings.model';
-import {SettingsComponent} from '../settings/settings.component'
+
 @Component({
-  selector: 'app-split-issn',
+  selector: 'app-split-issns',
   templateUrl: './split-issns.component.html',
   styleUrls: ['./split-issns.component.scss']
 })
@@ -37,9 +37,7 @@ export class SplitIssnsComponent implements OnInit {
     ignore_warnings: 'No'
   };
 
-  constructor(
-    private settingsService: CloudAppSettingsService
-  ) {}
+  constructor(private settingsService: CloudAppSettingsService) {}
 
   ngOnInit(): void {
     this.loading = true;
@@ -82,6 +80,7 @@ export class SplitIssnsComponent implements OnInit {
       }
     };
   }
+
   private readonly DOCLINE_COLUMNS: string[] = [
     'action',
     'record_type',
@@ -125,19 +124,20 @@ export class SplitIssnsComponent implements OnInit {
   }
 
   private downloadZipLocally(zipBlob: Blob, fileName: string): void {
-  const url = window.URL.createObjectURL(zipBlob);
-  const a = document.createElement('a');
+    const url = window.URL.createObjectURL(zipBlob);
+    const a = document.createElement('a');
 
-  a.href = url;
-  a.download = fileName;
-  a.style.display = 'none';
+    a.href = url;
+    a.download = fileName;
+    a.style.display = 'none';
 
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
 
-  window.URL.revokeObjectURL(url);
-}
+    window.URL.revokeObjectURL(url);
+  }
+
   async handleUpload(): Promise<void> {
     if (!this.analyticsFiles.length || !this.doclineFiles.length) {
       this.statusMessage = 'Please select one or more Analytics CSVs and one current Docline holdings CSV.';
@@ -174,9 +174,9 @@ export class SplitIssnsComponent implements OnInit {
       this.statusMessage = 'Propagating current Docline HOLDING values...';
       const propagatedCurrentDoclineRows = this.propagateHoldingValues(this.doclineRows);
 
-      const doclineHoldingRows = propagatedCurrentDoclineRows.filter((row: any) => {
-        return this.safeString(row['record_type']) === 'HOLDING';
-      });
+      const doclineHoldingRows = propagatedCurrentDoclineRows.filter((row: any) =>
+        this.safeString(row['record_type']) === 'HOLDING'
+      );
 
       const explodedDoclineHoldingIssns = this.explodeDoclineIssns(doclineHoldingRows);
 
@@ -219,29 +219,28 @@ export class SplitIssnsComponent implements OnInit {
       }
 
       const normalizedCurrentDoclineCompareRows = this.normalizeCompareRows(
-  this.propagateHoldingValues(this.doclineRows)
-);
-
-      const normalizedCurrentAlmaCompareRows = this.normalizeCompareRows(
-        this.finalRows
+        this.propagateHoldingValues(this.doclineRows)
       );
+
+      const normalizedCurrentAlmaCompareRows = this.normalizeCompareRows(this.finalRows);
+
+      this.statusMessage = 'Classifying output sets...';
 
       const classified = this.classifyOutputSets(
         normalizedCurrentAlmaCompareRows,
         normalizedCurrentDoclineCompareRows,
         inferredChoice
       );
-      this.statusMessage = 'Classifying output sets...';
 
       this.statusMessage = 'Building ZIP package...';
 
-const zipBlob = await this.buildOutputZip(
-  inferredChoice,
-  {
-    ...classified,
-    coverageParseErrorRows: this.coverageParseErrorRows
-  }
-);
+      const zipBlob = await this.buildOutputZip(
+        inferredChoice,
+        {
+          ...classified,
+          coverageParseErrorRows: this.coverageParseErrorRows
+        }
+      );
 
       this.statusMessage = 'Downloading ZIP package...';
       this.downloadZipLocally(zipBlob, `${inferredChoice}_Docline_Output.zip`);
@@ -256,37 +255,40 @@ const zipBlob = await this.buildOutputZip(
   }
 
   private inferChoiceFromAnalytics(rows: any[]): 'Electronic' | 'Print' {
-    const hasCoverage = rows.some((row: any) => this.hasValue(row['Coverage Information Combined']));
+    const hasCoverage = rows.some((row: any) =>
+      this.hasValue(row['Coverage Information Combined'])
+    );
+
     return hasCoverage ? 'Electronic' : 'Print';
   }
 
   private buildCoverageParseErrorRow(row: any, coverage: string, holdingsFormat: string): any {
-  return {
-    action: '',
-    record_type: 'ERROR',
-    serial_title: row['Title_x'],
-    nlm_unique_id: row['NLM_Unique_ID'],
-    holdings_format: holdingsFormat,
-    begin_volume: '',
-    end_volume: '',
-    begin_year: '',
-    end_year: '',
-    issns: this.hasValue(row['docline_issns_full'])
-      ? this.safeString(row['docline_issns_full'])
-      : this.safeString(row['ISSN_x']).replace(/;/g, ','),
-    currently_received: '',
-    retention_policy: this.doclineConfig.retention_policy,
-    limited_retention_period: this.doclineConfig.limited_retention_period,
-    limited_retention_type: this.doclineConfig.limited_retention_type,
-    embargo_period: 0,
-    has_epub_ahead_of_print: this.doclineConfig.has_epub_ahead_of_print,
-    has_supplements: this.doclineConfig.has_supplements,
-    ignore_warnings: this.doclineConfig.ignore_warnings,
-    last_modified: '',
-    coverage_statement: coverage,
-    error_message: 'Could not derive any non-missing print date range from holdings summary'
-  };
-}
+    return {
+      action: '',
+      record_type: 'ERROR',
+      serial_title: row['Title_x'],
+      nlm_unique_id: row['NLM_Unique_ID'],
+      holdings_format: holdingsFormat,
+      begin_volume: '',
+      end_volume: '',
+      begin_year: '',
+      end_year: '',
+      issns: this.hasValue(row['docline_issns_full'])
+        ? this.safeString(row['docline_issns_full'])
+        : this.safeString(row['ISSN_x']).replace(/;/g, ','),
+      currently_received: '',
+      retention_policy: this.doclineConfig.retention_policy,
+      limited_retention_period: this.doclineConfig.limited_retention_period,
+      limited_retention_type: this.doclineConfig.limited_retention_type,
+      embargo_period: 0,
+      has_epub_ahead_of_print: this.doclineConfig.has_epub_ahead_of_print,
+      has_supplements: this.doclineConfig.has_supplements,
+      ignore_warnings: this.doclineConfig.ignore_warnings,
+      last_modified: '',
+      coverage_statement: coverage,
+      error_message: 'Could not derive any non-missing print date range from holdings summary'
+    };
+  }
 
   private async readCsvFile(file: File): Promise<any[]> {
     return new Promise((resolve, reject) => {
@@ -509,7 +511,7 @@ const zipBlob = await this.buildOutputZip(
     return output;
   }
 
-    private normalizeCompareRows(rows: any[]): any[] {
+  private normalizeCompareRows(rows: any[]): any[] {
     return rows.map((row: any) => {
       const out = this.cloneRow(row);
 
@@ -529,16 +531,13 @@ const zipBlob = await this.buildOutputZip(
 
   private normalizeCompareYear(value: any): string {
     const s = this.safeString(value);
+
     if (!s || s === '<NA>') {
-      return '';
+      return '0';
     }
+
     return s;
-
-
-
   }
-
-
 
   private buildIndex(rows: any[], keyName: string): Map<string, any[]> {
     const index = new Map<string, any[]>();
@@ -625,38 +624,35 @@ const zipBlob = await this.buildOutputZip(
         holdingsFormat = 'Print';
       }
 
-      let covCombined = '';
-
-      if (choice === 'Print') {
-        covCombined = this.safeString(row['Summary Holdings']);
-      } else {
-        covCombined = this.safeString(row['Coverage Information Combined']);
-      }
+      const covCombined =
+        choice === 'Print'
+          ? this.safeString(row['Summary Holdings'])
+          : this.safeString(row['Coverage Information Combined']);
 
       const mainRow: any = {
         'Bibliographic Lifecycle': row['Lifecycle'],
-        'action': '',
-        'record_type': 'HOLDING',
-        'libid': this.doclineConfig.libid,
-        'serial_title': row['Title_x'],
-        'nlm_unique_id': row['NLM_Unique_ID'],
-        'holdings_format': holdingsFormat,
-        'begin_volume': null,
-        'end_volume': null,
-        'begin_year': '',
-        'end_year': '',
-        'issns': this.hasValue(row['docline_issns_full'])
+        action: '',
+        record_type: 'HOLDING',
+        libid: this.doclineConfig.libid,
+        serial_title: row['Title_x'],
+        nlm_unique_id: row['NLM_Unique_ID'],
+        holdings_format: holdingsFormat,
+        begin_volume: null,
+        end_volume: null,
+        begin_year: '',
+        end_year: '',
+        issns: this.hasValue(row['docline_issns_full'])
           ? this.safeString(row['docline_issns_full'])
           : this.safeString(row['ISSN_x']).replace(/;/g, ','),
-        'currently_received': this.computeCurrentlyReceived(holdingsFormat, covCombined),
-        'retention_policy': this.doclineConfig.retention_policy,
-        'limited_retention_period': this.doclineConfig.limited_retention_period,
-        'limited_retention_type': this.doclineConfig.limited_retention_type,
-        'embargo_period': 0,
-        'has_epub_ahead_of_print': this.doclineConfig.has_epub_ahead_of_print,
-        'has_supplements': this.doclineConfig.has_supplements,
-        'ignore_warnings': this.doclineConfig.ignore_warnings,
-        'last_modified': ''
+        currently_received: this.computeCurrentlyReceived(holdingsFormat, covCombined),
+        retention_policy: this.doclineConfig.retention_policy,
+        limited_retention_period: this.doclineConfig.limited_retention_period,
+        limited_retention_type: this.doclineConfig.limited_retention_type,
+        embargo_period: 0,
+        has_epub_ahead_of_print: this.doclineConfig.has_epub_ahead_of_print,
+        has_supplements: this.doclineConfig.has_supplements,
+        ignore_warnings: this.doclineConfig.ignore_warnings,
+        last_modified: ''
       };
 
       output.push(mainRow);
@@ -677,74 +673,74 @@ const zipBlob = await this.buildOutputZip(
         const year = this.safeInt(embargoYears[idx], 0);
         const embargoPeriod = choice === 'Electronic' ? (month ? month : year * 12) : 0;
 
-      if (holdingsFormat === 'Print' && this.looksLikePhysicalStatement(coverage)) {
-        const ranges = this.parsePhysicalRanges(coverage);
+        if (holdingsFormat === 'Print' && this.looksLikePhysicalStatement(coverage)) {
+          const ranges = this.parsePhysicalRanges(coverage);
 
-        if (!ranges.length) {
-          this.coverageParseErrorRows.push(
-            this.buildCoverageParseErrorRow(row, coverage, holdingsFormat)
-          );
+          if (!ranges.length) {
+            this.coverageParseErrorRows.push(
+              this.buildCoverageParseErrorRow(row, coverage, holdingsFormat)
+            );
+            return;
+          }
+
+          ranges.forEach((pair: any) => {
+            rangeRows.push({
+              'Bibliographic Lifecycle': row['Lifecycle'],
+              action: '',
+              record_type: 'RANGE',
+              libid: this.doclineConfig.libid,
+              serial_title: row['Title_x'],
+              nlm_unique_id: row['NLM_Unique_ID'],
+              holdings_format: holdingsFormat,
+              begin_volume: null,
+              end_volume: null,
+              begin_year: pair.beginYear,
+              end_year: pair.endYear,
+              issns: this.hasValue(row['docline_issns_full'])
+                ? this.safeString(row['docline_issns_full'])
+                : this.safeString(row['ISSN_x']).replace(/;/g, ','),
+              currently_received: pair.endYear === null ? 'Yes' : 'No',
+              retention_policy: this.doclineConfig.retention_policy,
+              limited_retention_period: this.doclineConfig.limited_retention_period,
+              limited_retention_type: this.doclineConfig.limited_retention_type,
+              embargo_period: embargoPeriod,
+              has_epub_ahead_of_print: this.doclineConfig.has_epub_ahead_of_print,
+              has_supplements: this.doclineConfig.has_supplements,
+              ignore_warnings: this.doclineConfig.ignore_warnings,
+              last_modified: ''
+            });
+          });
+
           return;
         }
-
-        ranges.forEach((pair: any) => {
-          rangeRows.push({
-            'Bibliographic Lifecycle': row['Lifecycle'],
-            'action': '',
-            'record_type': 'RANGE',
-            'libid': this.doclineConfig.libid,
-            'serial_title': row['Title_x'],
-            'nlm_unique_id': row['NLM_Unique_ID'],
-            'holdings_format': holdingsFormat,
-            'begin_volume': null,
-            'end_volume': null,
-            'begin_year': pair.beginYear,
-            'end_year': pair.endYear,
-            'issns': this.hasValue(row['docline_issns_full'])
-              ? this.safeString(row['docline_issns_full'])
-              : this.safeString(row['ISSN_x']).replace(/;/g, ','),
-            'currently_received': pair.endYear === null ? 'Yes' : 'No',
-            'retention_policy': this.doclineConfig.retention_policy,
-            'limited_retention_period': this.doclineConfig.limited_retention_period,
-            'limited_retention_type': this.doclineConfig.limited_retention_type,
-            'embargo_period': embargoPeriod,
-            'has_epub_ahead_of_print': this.doclineConfig.has_epub_ahead_of_print,
-            'has_supplements': this.doclineConfig.has_supplements,
-            'ignore_warnings': this.doclineConfig.ignore_warnings,
-            'last_modified': ''
-          });
-        });
-
-        return;
-      }
 
         const electronicRange = this.parseElectronicCoverage(coverage);
 
         if (electronicRange.beginYear) {
           rangeRows.push({
             'Bibliographic Lifecycle': row['Lifecycle'],
-            'action': '',
-            'record_type': 'RANGE',
-            'libid': this.doclineConfig.libid,
-            'serial_title': row['Title_x'],
-            'nlm_unique_id': row['NLM_Unique_ID'],
-            'holdings_format': holdingsFormat,
-            'begin_volume': electronicRange.beginVolume,
-            'end_volume': electronicRange.endVolume,
-            'begin_year': electronicRange.beginYear,
-            'end_year': electronicRange.endYear,
-            'issns': this.hasValue(row['docline_issns_full'])
+            action: '',
+            record_type: 'RANGE',
+            libid: this.doclineConfig.libid,
+            serial_title: row['Title_x'],
+            nlm_unique_id: row['NLM_Unique_ID'],
+            holdings_format: holdingsFormat,
+            begin_volume: electronicRange.beginVolume,
+            end_volume: electronicRange.endVolume,
+            begin_year: electronicRange.beginYear,
+            end_year: electronicRange.endYear,
+            issns: this.hasValue(row['docline_issns_full'])
               ? this.safeString(row['docline_issns_full'])
               : this.safeString(row['ISSN_x']).replace(/;/g, ','),
-            'currently_received': /until/i.test(covCombined) ? 'No' : 'Yes',
-            'retention_policy': this.doclineConfig.retention_policy,
-            'limited_retention_period': this.doclineConfig.limited_retention_period,
-            'limited_retention_type': this.doclineConfig.limited_retention_type,
-            'embargo_period': embargoPeriod,
-            'has_epub_ahead_of_print': this.doclineConfig.has_epub_ahead_of_print,
-            'has_supplements': this.doclineConfig.has_supplements,
-            'ignore_warnings': this.doclineConfig.ignore_warnings,
-            'last_modified': ''
+            currently_received: /until/i.test(covCombined) ? 'No' : 'Yes',
+            retention_policy: this.doclineConfig.retention_policy,
+            limited_retention_period: this.doclineConfig.limited_retention_period,
+            limited_retention_type: this.doclineConfig.limited_retention_type,
+            embargo_period: embargoPeriod,
+            has_epub_ahead_of_print: this.doclineConfig.has_epub_ahead_of_print,
+            has_supplements: this.doclineConfig.has_supplements,
+            ignore_warnings: this.doclineConfig.ignore_warnings,
+            last_modified: ''
           });
         }
       });
@@ -774,7 +770,7 @@ const zipBlob = await this.buildOutputZip(
     ];
 
     const output = rows.map((row: any) => this.cloneRow(row));
-    let storedValues: any = {};
+    const storedValues: any = {};
 
     columnsToUpdate.forEach((col: string) => {
       storedValues[col] = null;
@@ -943,17 +939,11 @@ const zipBlob = await this.buildOutputZip(
     const almaByKey = this.groupByHoldingKey(currentAlmaCompressedRows);
     const doclineByKey = this.groupByHoldingKey(existingDoclineForCompareRows);
 
-    const almaKeys = new Set(Object.keys(almaByKey));
-    const doclineKeys = new Set(Object.keys(doclineByKey));
     const allKeys = new Set<string>();
 
-    almaKeys.forEach((key: string) => {
-      allKeys.add(key);
-    });
+    Object.keys(almaByKey).forEach((key: string) => allKeys.add(key));
+    Object.keys(doclineByKey).forEach((key: string) => allKeys.add(key));
 
-    doclineKeys.forEach((key: string) => {
-      allKeys.add(key);
-    });
     const addRows: any[] = [];
     const fullMatchRows: any[] = [];
     const updateRows: any[] = [];
@@ -968,15 +958,14 @@ const zipBlob = await this.buildOutputZip(
       const doclineRows = doclineByKey[key] || [];
 
       if (almaRows.length > 0 && doclineRows.length === 0) {
-  Array.prototype.push.apply(addRows, almaRows);
-  return;
-}
+        Array.prototype.push.apply(addRows, almaRows);
+        return;
+      }
 
       if (almaRows.length === 0 && doclineRows.length > 0) {
         const shouldDelete = this.shouldDeleteDoclineOnlyRows(doclineRows, choice);
 
-
-               if (shouldDelete) {
+        if (shouldDelete) {
           Array.prototype.push.apply(deletedRows, doclineRows);
         } else {
           Array.prototype.push.apply(inDoclineOnlyPreserveRows, doclineRows);
@@ -1003,23 +992,24 @@ const zipBlob = await this.buildOutputZip(
       Array.prototype.push.apply(differentRangesAlmaRows, almaRows);
       Array.prototype.push.apply(differentRangesDoclineRows, doclineRows);
 
-      const almaMissingDates = almaRows.filter((row: any) => !this.hasValue(row['begin_year']));
+      const almaMissingDateRanges = almaRows.filter((row: any) =>
+        this.safeString(row['record_type']) === 'RANGE' &&
+        !this.hasValue(row['begin_year'])
+      );
 
-      if (almaMissingDates.length > 0) {
-        Array.prototype.push.apply(noDatesRows, almaMissingDates);
-      } else {
-        almaRows.forEach((row: any) => {
-          const cloned = this.cloneRow(row);
-          cloned['_update_source'] = 'ALMA';
-          updateRows.push(cloned);
-        });
+      Array.prototype.push.apply(noDatesRows, almaMissingDateRanges);
 
-        doclineRows.forEach((row: any) => {
-          const cloned = this.cloneRow(row);
-          cloned['_update_source'] = 'DOCLINE';
-          updateRows.push(cloned);
-        });
-      }
+      doclineRows.forEach((row: any) => {
+        const cloned = this.cloneRow(row);
+        cloned['_update_source'] = 'DOCLINE';
+        updateRows.push(cloned);
+      });
+
+      almaRows.forEach((row: any) => {
+        const cloned = this.cloneRow(row);
+        cloned['_update_source'] = 'ALMA';
+        updateRows.push(cloned);
+      });
     });
 
     this.applyFinalActionAndPrefix(addRows, 'ADD');
@@ -1054,9 +1044,11 @@ const zipBlob = await this.buildOutputZip(
         if (action === 'DELETE') {
           return 0;
         }
+
         if (action === 'ADD') {
           return 1;
         }
+
         return 2;
       };
 
@@ -1064,9 +1056,11 @@ const zipBlob = await this.buildOutputZip(
         if (recordType === 'HOLDING') {
           return 0;
         }
+
         if (recordType === 'RANGE') {
           return 1;
         }
+
         return 2;
       };
 
@@ -1102,9 +1096,9 @@ const zipBlob = await this.buildOutputZip(
 
       return aKey.localeCompare(bKey);
     });
+
     this.sortFinalRows(addRows);
     this.sortFinalRows(fullMatchRows);
-    this.sortFinalRows(updateRows);
     this.sortFinalRows(differentRangesAlmaRows);
     this.sortFinalRows(differentRangesDoclineRows);
     this.sortFinalRows(deletedRows);
@@ -1132,10 +1126,10 @@ const zipBlob = await this.buildOutputZip(
     const grouped: { [key: string]: any[] } = {};
 
     rows.forEach((row: any) => {
-      const key = [
-        this.safeString(row['nlm_unique_id']).replace(/^NLM_/, ''),
-        this.safeString(row['holdings_format'])
-      ].join('||');
+      const nlm = this.safeString(row['nlm_unique_id']).replace(/^NLM_/, '');
+      const format = this.safeString(row['holdings_format']);
+
+      const key = [nlm, format].join('||');
 
       if (!grouped[key]) {
         grouped[key] = [];
@@ -1148,92 +1142,89 @@ const zipBlob = await this.buildOutputZip(
   }
 
   private issnSetsCompatible(almaIssns: any, doclineIssns: any): boolean {
-  const normalize = (value: any): string[] => {
-    return this.safeString(value)
+    const normalize = (value: any): string[] => {
+      return this.safeString(value)
+        .split(',')
+        .map((v: string) => v.replace(/\s*\((Print|Electronic)\)\s*/gi, '').trim())
+        .filter((v: string) => !!v)
+        .sort();
+    };
+
+    const alma = normalize(almaIssns);
+    const docline = normalize(doclineIssns);
+
+    if (!alma.length && !docline.length) {
+      return true;
+    }
+
+    for (let i = 0; i < alma.length; i++) {
+      if (docline.indexOf(alma[i]) === -1) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private normalizeIssnsForCompare(value: any): string {
+    const raw = this.safeString(value);
+
+    if (!raw) {
+      return '';
+    }
+
+    const parts = raw
       .split(',')
       .map((v: string) => v.replace(/\s*\((Print|Electronic)\)\s*/gi, '').trim())
       .filter((v: string) => !!v)
       .sort();
-  };
 
-  const alma = normalize(almaIssns);
-  const docline = normalize(doclineIssns);
-
-  if (!alma.length && !docline.length) {
-    return true;
+    return parts.join(',');
   }
 
-  let i = 0;
-  for (i = 0; i < alma.length; i++) {
-    if (docline.indexOf(alma[i]) === -1) {
-      return false;
-    }
+  private buildRangeSignature(rows: any[]): string {
+    const normalized = rows
+      .map((row: any) => ({
+        record_type: this.safeString(row['record_type']),
+        begin_volume: this.safeString(row['begin_volume']),
+        end_volume: this.safeString(row['end_volume']),
+        begin_year: this.normalizeCompareYear(row['begin_year']),
+        end_year: this.normalizeCompareYear(row['end_year']),
+        embargo_period: this.safeString(row['embargo_period']),
+        currently_received: this.safeString(row['currently_received']),
+        holdings_format: this.safeString(row['holdings_format']),
+        issns: this.normalizeIssnsForCompare(row['issns'])
+      }))
+      .sort((a: any, b: any) => {
+        const aKey = [
+          a.record_type,
+          a.begin_volume,
+          a.end_volume,
+          a.begin_year,
+          a.end_year,
+          a.embargo_period,
+          a.currently_received,
+          a.holdings_format,
+          a.issns
+        ].join('||');
+
+        const bKey = [
+          b.record_type,
+          b.begin_volume,
+          b.end_volume,
+          b.begin_year,
+          b.end_year,
+          b.embargo_period,
+          b.currently_received,
+          b.holdings_format,
+          b.issns
+        ].join('||');
+
+        return aKey.localeCompare(bKey);
+      });
+
+    return JSON.stringify(normalized);
   }
-
-  return true;
-}
-
-
-private normalizeIssnsForCompare(value: any): string {
-  const raw = this.safeString(value);
-
-  if (!raw) {
-    return '';
-  }
-
-  const parts = raw
-    .split(',')
-    .map((v: string) => v.replace(/\s*\((Print|Electronic)\)\s*/gi, '').trim())
-    .filter((v: string) => !!v)
-    .sort();
-
-  return parts.join(',');
-}
-private buildRangeSignature(rows: any[]): string {
-  const normalized = rows
-    .map((row: any) => ({
-      record_type: this.safeString(row['record_type']),
-      begin_volume: this.safeString(row['begin_volume']),
-      end_volume: this.safeString(row['end_volume']),
-      begin_year: this.normalizeCompareYear(row['begin_year']),
-      end_year: this.normalizeCompareYear(row['end_year']),
-      embargo_period: this.safeString(row['embargo_period']),
-      currently_received: this.safeString(row['currently_received']),
-      holdings_format: this.safeString(row['holdings_format']),
-      // compare on normalized ISSN set, not literal string
-      issns: this.normalizeIssnsForCompare(row['issns'])
-    }))
-    .sort((a: any, b: any) => {
-      const aKey = [
-        a.record_type,
-        a.begin_volume,
-        a.end_volume,
-        a.begin_year,
-        a.end_year,
-        a.embargo_period,
-        a.currently_received,
-        a.holdings_format,
-        a.issns
-      ].join('||');
-
-      const bKey = [
-        b.record_type,
-        b.begin_volume,
-        b.end_volume,
-        b.begin_year,
-        b.end_year,
-        b.embargo_period,
-        b.currently_received,
-        b.holdings_format,
-        b.issns
-      ].join('||');
-
-      return aKey.localeCompare(bKey);
-    });
-
-  return JSON.stringify(normalized);
-}
-
 
   private shouldDeleteDoclineOnlyRows(
     rows: any[],
@@ -1248,82 +1239,80 @@ private buildRangeSignature(rows: any[]): string {
     return false;
   }
 
-private applyFinalActionAndPrefix(rows: any[], action: string): void {
-  rows.forEach((row: any) => {
-    const nlm = this.safeString(row['nlm_unique_id']).replace(/^NLM_/, '');
+  private applyFinalActionAndPrefix(rows: any[], action: string): void {
+    rows.forEach((row: any) => {
+      const nlm = this.safeString(row['nlm_unique_id']).replace(/^NLM_/, '');
 
-    if (nlm) {
-      row['nlm_unique_id'] = 'NLM_' + nlm;
-    }
-
-    row['action'] = action;
-
-    // 🔥 FIX: blank out end_year for ADD rows if it is "0"
-    if (action === 'ADD') {
-      if (this.safeString(row['end_year']) === '0' || row['end_year'] === 0) {
-        row['end_year'] = '';
+      if (nlm) {
+        row['nlm_unique_id'] = 'NLM_' + nlm;
       }
-    }
-  });
-}
- 
 
-private sortFinalRows(rows: any[]): void {
-  rows.sort((a: any, b: any) => {
-    const serialTitleCompare = this.safeString(a['serial_title']).localeCompare(
-      this.safeString(b['serial_title'])
-    );
+      row['action'] = action;
 
-    if (serialTitleCompare !== 0) {
-      return serialTitleCompare;
-    }
+      if (action === 'ADD') {
+        if (this.safeString(row['end_year']) === '0' || row['end_year'] === 0) {
+          row['end_year'] = '';
+        }
+      }
+    });
+  }
 
-    const nlmCompare = this.safeString(a['nlm_unique_id']).localeCompare(
-      this.safeString(b['nlm_unique_id'])
-    );
+  private sortFinalRows(rows: any[]): void {
+    rows.sort((a: any, b: any) => {
+      const serialTitleCompare = this.safeString(a['serial_title']).localeCompare(
+        this.safeString(b['serial_title'])
+      );
 
-    if (nlmCompare !== 0) {
-      return nlmCompare;
-    }
+      if (serialTitleCompare !== 0) {
+        return serialTitleCompare;
+      }
 
-    // third sort key, reverse alphabetical
-    const actionCompare = this.safeString(b['action']).localeCompare(
-      this.safeString(a['action'])
-    );
+      const nlmCompare = this.safeString(a['nlm_unique_id']).localeCompare(
+        this.safeString(b['nlm_unique_id'])
+      );
 
-    if (actionCompare !== 0) {
-      return actionCompare;
-    }
+      if (nlmCompare !== 0) {
+        return nlmCompare;
+      }
 
-    const recordTypeCompare = this.safeString(a['record_type']).localeCompare(
-      this.safeString(b['record_type'])
-    );
+      const actionCompare = this.safeString(b['action']).localeCompare(
+        this.safeString(a['action'])
+      );
 
-    if (recordTypeCompare !== 0) {
-      return recordTypeCompare;
-    }
+      if (actionCompare !== 0) {
+        return actionCompare;
+      }
 
-    const embargoCompare = this.safeString(a['embargo_period']).localeCompare(
-      this.safeString(b['embargo_period'])
-    );
+      const recordTypeCompare = this.safeString(a['record_type']).localeCompare(
+        this.safeString(b['record_type'])
+      );
 
-    if (embargoCompare !== 0) {
-      return embargoCompare;
-    }
+      if (recordTypeCompare !== 0) {
+        return recordTypeCompare;
+      }
 
-    const beginYearCompare = this.safeString(a['begin_year']).localeCompare(
-      this.safeString(b['begin_year'])
-    );
+      const embargoCompare = this.safeString(a['embargo_period']).localeCompare(
+        this.safeString(b['embargo_period'])
+      );
 
-    if (beginYearCompare !== 0) {
-      return beginYearCompare;
-    }
+      if (embargoCompare !== 0) {
+        return embargoCompare;
+      }
 
-    return this.safeString(a['end_year']).localeCompare(
-      this.safeString(b['end_year'])
-    );
-  });
-}
+      const beginYearCompare = this.safeString(a['begin_year']).localeCompare(
+        this.safeString(b['begin_year'])
+      );
+
+      if (beginYearCompare !== 0) {
+        return beginYearCompare;
+      }
+
+      return this.safeString(a['end_year']).localeCompare(
+        this.safeString(b['end_year'])
+      );
+    });
+  }
+
   private normalizeForFinalOutput(rows: any[]): any[] {
     const dropCols = new Set([
       'libid',
@@ -1335,14 +1324,6 @@ private sortFinalRows(rows: any[]): void {
 
     return rows.map((row: any) => {
       const cleaned: any = {};
-
-      // Object.keys(row).forEach((key: string) => {
-      //   const trimmed = String(key).trim();
-
-      //   if (!dropCols.has(trimmed)) {
-      //     cleaned[trimmed] = row[key];
-      //   }
-      // });
 
       Object.keys(row).forEach((key: string) => {
         const trimmed = String(key).trim();
@@ -1373,7 +1354,7 @@ private sortFinalRows(rows: any[]): void {
     noDatesRows: any[];
   }): any[] {
     const makeRow = (setName: string, rows: any[]) => ({
-      'Set': setName,
+      Set: setName,
       'Number of Rows': rows.length,
       'Number of NLM Unique IDs': this.uniqueCountByKey(rows, 'nlm_unique_id')
     });
@@ -1474,34 +1455,35 @@ private sortFinalRows(rows: any[]): void {
     }
 
     outputFolder.file(
-  `${choice} Coverage Parse Errors.csv`,
-  this.rowsToCsv(
-    outputSets.coverageParseErrorRows,
-    [
-      'action',
-      'record_type',
-      'serial_title',
-      'nlm_unique_id',
-      'holdings_format',
-      'begin_volume',
-      'end_volume',
-      'begin_year',
-      'end_year',
-      'issns',
-      'currently_received',
-      'retention_policy',
-      'limited_retention_period',
-      'limited_retention_type',
-      'embargo_period',
-      'has_epub_ahead_of_print',
-      'has_supplements',
-      'ignore_warnings',
-      'last_modified',
-      'coverage_statement',
-      'error_message'
-    ]
-  )
-);
+      `${choice} Coverage Parse Errors.csv`,
+      this.rowsToCsv(
+        outputSets.coverageParseErrorRows,
+        [
+          'action',
+          'record_type',
+          'serial_title',
+          'nlm_unique_id',
+          'holdings_format',
+          'begin_volume',
+          'end_volume',
+          'begin_year',
+          'end_year',
+          'issns',
+          'currently_received',
+          'retention_policy',
+          'limited_retention_period',
+          'limited_retention_type',
+          'embargo_period',
+          'has_epub_ahead_of_print',
+          'has_supplements',
+          'ignore_warnings',
+          'last_modified',
+          'coverage_statement',
+          'error_message'
+        ]
+      )
+    );
+
     outputFolder.file(
       `${choice} Add Final.csv`,
       this.rowsToCsv(this.projectDoclineColumns(outputSets.addRows), this.DOCLINE_COLUMNS)
@@ -1553,7 +1535,7 @@ private sortFinalRows(rows: any[]): void {
     return await zip.generateAsync({
       type: 'blob'
     });
-  } 
+  }
 
   private async uploadZipToServer(
     zipBlob: Blob,
@@ -1634,81 +1616,82 @@ private sortFinalRows(rows: any[]): void {
   }
 
   private parsePhysicalRanges(statement: string): any[] {
-  if (!statement) {
-    return [];
+    if (!statement) {
+      return [];
+    }
+
+    const segments = statement
+      .split(/;\s*/)
+      .map((s: string) => s.trim())
+      .filter((s: string) => !!s);
+
+    const positiveSegments: string[] = [];
+    let inMissingBlock = false;
+
+    segments.forEach((rawSegment: string) => {
+      let seg = rawSegment.trim();
+
+      if (/^Missing:\s*/i.test(seg)) {
+        inMissingBlock = true;
+        seg = seg.replace(/^Missing:\s*/i, '').trim();
+      }
+
+      const hasYear = !!this.extractYear(seg);
+
+      if (inMissingBlock) {
+        if (!hasYear) {
+          return;
+        }
+
+        inMissingBlock = false;
+      }
+
+      if (seg) {
+        positiveSegments.push(seg);
+      }
+    });
+
+    if (!positiveSegments.length) {
+      return [];
+    }
+
+    const ranges: any[] = [];
+
+    positiveSegments.forEach((seg: string) => {
+      if (seg.indexOf('-') > -1) {
+        const pieces = seg.split('-', 2);
+        const left = pieces[0];
+        const right = pieces[1] || '';
+
+        const beginYear = this.extractYear(left);
+        let endYear = this.extractYear(right);
+
+        const openEnded = right.trim() === '' || /-\s*$/.test(seg);
+        if (openEnded) {
+          endYear = null;
+        }
+
+        if (beginYear) {
+          ranges.push({
+            beginYear,
+            endYear
+          });
+        }
+      } else {
+        const y = this.extractYear(seg);
+
+        if (y) {
+          ranges.push({
+            beginYear: y,
+            endYear: y
+          });
+        }
+      }
+    });
+
+    return this.dedupeByKey(ranges, ['beginYear', 'endYear']);
   }
 
-  const segments = statement
-    .split(/;\s*/)
-    .map((s: string) => s.trim())
-    .filter((s: string) => !!s);
-
-  const positiveSegments: string[] = [];
-  let inMissingBlock = false;
-
-  segments.forEach((rawSegment: string) => {
-    let seg = rawSegment.trim();
-
-    if (/^Missing:\s*/i.test(seg)) {
-      inMissingBlock = true;
-      seg = seg.replace(/^Missing:\s*/i, '').trim();
-    }
-
-    const hasYear = !!this.extractYear(seg);
-
-    // While we're in a Missing block, skip issue/volume fragments that have no year.
-    // The first segment with a year is treated as the first real holdings segment.
-    if (inMissingBlock) {
-      if (!hasYear) {
-        return;
-      }
-      inMissingBlock = false;
-    }
-
-    if (seg) {
-      positiveSegments.push(seg);
-    }
-  });
-
-  if (!positiveSegments.length) {
-    return [];
-  }
-
-  const ranges: any[] = [];
-
-  positiveSegments.forEach((seg: string) => {
-    if (seg.indexOf('-') > -1) {
-      const pieces = seg.split('-', 2);
-      const left = pieces[0];
-      const right = pieces[1] || '';
-
-      const beginYear = this.extractYear(left);
-      let endYear = this.extractYear(right);
-
-      const openEnded = right.trim() === '' || /-\s*$/.test(seg);
-      if (openEnded) {
-        endYear = null;
-      }
-
-      if (beginYear) {
-        ranges.push({
-          beginYear: beginYear,
-          endYear: endYear
-        });
-      }
-    } else {
-      const y = this.extractYear(seg);
-      if (y) {
-        ranges.push({
-          beginYear: y,
-          endYear: y
-        });
-      }
-    }
-  });
-
-  return this.dedupeByKey(ranges, ['beginYear', 'endYear']);
-}
   private computeCurrentlyReceived(
     holdingsFormat: string,
     coverageCombined: string
