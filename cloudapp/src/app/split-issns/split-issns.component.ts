@@ -1040,6 +1040,22 @@ export class SplitIssnsComponent implements OnInit {
     });
 
     updateRows.sort((a: any, b: any) => {
+      const nlmCompare = this.safeString(a['nlm_unique_id']).localeCompare(
+        this.safeString(b['nlm_unique_id'])
+      );
+
+      if (nlmCompare !== 0) {
+        return nlmCompare;
+      }
+
+      const formatCompare = this.safeString(a['holdings_format']).localeCompare(
+        this.safeString(b['holdings_format'])
+      );
+
+      if (formatCompare !== 0) {
+        return formatCompare;
+      }
+
       const actionRank = (action: string): number => {
         if (action === 'DELETE') {
           return 0;
@@ -1051,6 +1067,14 @@ export class SplitIssnsComponent implements OnInit {
 
         return 2;
       };
+
+      const actionCompare =
+        actionRank(this.safeString(a['action'])) -
+        actionRank(this.safeString(b['action']));
+
+      if (actionCompare !== 0) {
+        return actionCompare;
+      }
 
       const recordTypeRank = (recordType: string): number => {
         if (recordType === 'HOLDING') {
@@ -1064,37 +1088,25 @@ export class SplitIssnsComponent implements OnInit {
         return 2;
       };
 
-      const aAction = actionRank(this.safeString(a['action']));
-      const bAction = actionRank(this.safeString(b['action']));
+      const recordTypeCompare =
+        recordTypeRank(this.safeString(a['record_type'])) -
+        recordTypeRank(this.safeString(b['record_type']));
 
-      if (aAction !== bAction) {
-        return aAction - bAction;
+      if (recordTypeCompare !== 0) {
+        return recordTypeCompare;
       }
 
-      const aRecordType = recordTypeRank(this.safeString(a['record_type']));
-      const bRecordType = recordTypeRank(this.safeString(b['record_type']));
+      const beginYearCompare = this.safeString(a['begin_year']).localeCompare(
+        this.safeString(b['begin_year'])
+      );
 
-      if (aRecordType !== bRecordType) {
-        return aRecordType - bRecordType;
+      if (beginYearCompare !== 0) {
+        return beginYearCompare;
       }
 
-      const aKey = [
-        this.safeString(a['serial_title']),
-        this.safeString(a['nlm_unique_id']),
-        this.safeString(a['holdings_format']),
-        this.safeString(a['begin_year']),
-        this.safeString(a['end_year'])
-      ].join('||');
-
-      const bKey = [
-        this.safeString(b['serial_title']),
-        this.safeString(b['nlm_unique_id']),
-        this.safeString(b['holdings_format']),
-        this.safeString(b['begin_year']),
+      return this.safeString(a['end_year']).localeCompare(
         this.safeString(b['end_year'])
-      ].join('||');
-
-      return aKey.localeCompare(bKey);
+      );
     });
 
     this.sortFinalRows(addRows);
