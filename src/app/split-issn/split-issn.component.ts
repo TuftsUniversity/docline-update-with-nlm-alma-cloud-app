@@ -527,16 +527,13 @@ const zipBlob = await this.buildOutputZip(
     });
   }
 
-  private normalizeCompareYear(value: any): string {
-    const s = this.safeString(value);
-    if (!s || s === '<NA>') {
-      return '';
-    }
-    return s;
-
-
-
+private normalizeCompareYear(value: any): string {
+  const s = this.safeString(value);
+  if (!s || s === '<NA>') {
+    return '0';
   }
+  return s;
+}
 
 
 
