@@ -1078,24 +1078,24 @@ const zipBlob = await this.buildOutputZip(
     countsRows: this.buildCountsRowsFromSets(normalized)
   };
 }
-  private groupByHoldingKey(rows: any[]): { [key: string]: any[] } {
-    const grouped: { [key: string]: any[] } = {};
+private groupByHoldingKey(rows: any[]): { [key: string]: any[] } {
+  const grouped: { [key: string]: any[] } = {};
 
-    rows.forEach((row: any) => {
-      const key = [
-        this.safeString(row['nlm_unique_id']).replace(/^NLM_/, ''),
-        this.safeString(row['holdings_format'])
-      ].join('||');
+  rows.forEach((row: any) => {
+    const nlm = this.safeString(row['nlm_unique_id']).replace(/^NLM_/, '');
+    const format = this.safeString(row['holdings_format']) || 'Electronic';
 
-      if (!grouped[key]) {
-        grouped[key] = [];
-      }
+    const key = [nlm, format].join('||');
 
-      grouped[key].push(this.cloneRow(row));
-    });
+    if (!grouped[key]) {
+      grouped[key] = [];
+    }
 
-    return grouped;
-  }
+    grouped[key].push(this.cloneRow(row));
+  });
+
+  return grouped;
+}
 
   private issnSetsCompatible(almaIssns: any, doclineIssns: any): boolean {
   const normalize = (value: any): string[] => {
