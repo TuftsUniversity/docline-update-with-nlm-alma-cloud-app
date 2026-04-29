@@ -922,83 +922,76 @@ const zipBlob = await this.buildOutputZip(
     return outputRows;
   }
 
-  private classifyOutputSets(
-    currentAlmaCompressedRows: any[],
-    existingDoclineForCompareRows: any[],
-    choice: 'Electronic' | 'Print'
-  ): {
-    addRows: any[];
-    fullMatchRows: any[];
-    updateRows: any[];
-    differentRangesDoclineRows: any[];
-    differentRangesAlmaRows: any[];
-    deletedRows: any[];
-    inDoclineOnlyPreserveRows: any[];
-    noDatesRows: any[];
-    countsRows: any[];
-  } {
-    const almaByKey = this.groupByHoldingKey(currentAlmaCompressedRows);
-    const doclineByKey = this.groupByHoldingKey(existingDoclineForCompareRows);
+ private classifyOutputSets(
+  currentAlmaCompressedRows: any[],
+  existingDoclineForCompareRows: any[],
+  choice: 'Electronic' | 'Print'
+): {
+  addRows: any[];
+  fullMatchRows: any[];
+  updateRows: any[];
+  differentRangesDoclineRows: any[];
+  differentRangesAlmaRows: any[];
+  deletedRows: any[];
+  inDoclineOnlyPreserveRows: any[];
+  noDatesRows: any[];
+  countsRows: any[];
+} {
+  const almaByKey = this.groupByHoldingKey(currentAlmaCompressedRows);
+  const doclineByKey = this.groupByHoldingKey(existingDoclineForCompareRows);
 
-    const almaKeys = new Set(Object.keys(almaByKey));
-    const doclineKeys = new Set(Object.keys(doclineByKey));
-    const allKeys = new Set<string>();
+  const allKeys = new Set<string>();
 
-    almaKeys.forEach((key: string) => {
-      allKeys.add(key);
-    });
+  Object.keys(almaByKey).forEach((key: string) => allKeys.add(key));
+  Object.keys(doclineByKey).forEach((key: string) => allKeys.add(key));
 
-    doclineKeys.forEach((key: string) => {
-      allKeys.add(key);
-    });
-    const addRows: any[] = [];
-    const fullMatchRows: any[] = [];
-    const updateRows: any[] = [];
-    const differentRangesDoclineRows: any[] = [];
-    const differentRangesAlmaRows: any[] = [];
-    const deletedRows: any[] = [];
-    const inDoclineOnlyPreserveRows: any[] = [];
-    const noDatesRows: any[] = [];
+  const addRows: any[] = [];
+  const fullMatchRows: any[] = [];
+  const updateRows: any[] = [];
+  const differentRangesDoclineRows: any[] = [];
+  const differentRangesAlmaRows: any[] = [];
+  const deletedRows: any[] = [];
+  const inDoclineOnlyPreserveRows: any[] = [];
+  const noDatesRows: any[] = [];
 
-    allKeys.forEach((key: string) => {
-      const almaRows = almaByKey[key] || [];
-      const doclineRows = doclineByKey[key] || [];
+  allKeys.forEach((key: string) => {
+    const almaRows = almaByKey[key] || [];
+    const doclineRows = doclineByKey[key] || [];
 
-      if (almaRows.length > 0 && doclineRows.length === 0) {
-        Array.prototype.push.apply(addRows, almaRows);
-        return;
+    if (almaRows.length > 0 && doclineRows.length === 0) {
+      Array.prototype.push.apply(addRows, almaRows);
+      return;
+    }
+
+    if (almaRows.length === 0 && doclineRows.length > 0) {
+      const shouldDelete = this.shouldDeleteDoclineOnlyRows(doclineRows, choice);
+
+      if (shouldDelete) {
+        Array.prototype.push.apply(deletedRows, doclineRows);
+      } else {
+        Array.prototype.push.apply(inDoclineOnlyPreserveRows, doclineRows);
       }
 
-      if (almaRows.length === 0 && doclineRows.length > 0) {
-        const shouldDelete = this.shouldDeleteDoclineOnlyRows(doclineRows, choice);
+      return;
+    }
 
+    const almaSignature = this.buildRangeSignature(almaRows);
+    const doclineSignature = this.buildRangeSignature(doclineRows);
 
-               if (shouldDelete) {
-          Array.prototype.push.apply(deletedRows, doclineRows);
-        } else {
-          Array.prototype.push.apply(inDoclineOnlyPreserveRows, doclineRows);
-        }
+    const issnsCompatible =
+      almaRows.length === doclineRows.length &&
+      almaRows.every((almaRow: any, idx: number) => {
+        const doclineRow = doclineRows[idx];
+        return this.issnSetsCompatible(almaRow['issns'], doclineRow['issns']);
+      });
 
-        return;
-      }
+    if (almaSignature === doclineSignature && issnsCompatible) {
+      Array.prototype.push.apply(fullMatchRows, almaRows);
+      return;
+    }
 
-      const almaSignature = this.buildRangeSignature(almaRows);
-      const doclineSignature = this.buildRangeSignature(doclineRows);
-
-      const issnsCompatible =
-        almaRows.length === doclineRows.length &&
-        almaRows.every((almaRow: any, idx: number) => {
-          const doclineRow = doclineRows[idx];
-          return this.issnSetsCompatible(almaRow['issns'], doclineRow['issns']);
-        });
-
-      if (almaSignature === doclineSignature && issnsCompatible) {
-        Array.prototype.push.apply(fullMatchRows, almaRows);
-        return;
-      }
-
-      Array.prototype.push.apply(differentRangesAlmaRows, almaRows);
-      Array.prototype.push.apply(differentRangesDoclineRows, doclineRows);
+    Array.prototype.push.apply(differentRangesAlmaRows, almaRows);
+    Array.prototype.push.apply(differentRangesDoclineRows, doclineRows);
 
     const almaRangeRows = almaRows.filter((row: any) =>
       this.safeString(row['record_type']) === 'RANGE'
@@ -1024,111 +1017,62 @@ const zipBlob = await this.buildOutputZip(
       cloned['_update_source'] = 'DOCLINE';
       updateRows.push(cloned);
     });
-    this.applyFinalActionAndPrefix(addRows, 'ADD');
-    this.applyFinalActionAndPrefix(fullMatchRows, 'ADD');
-    this.applyFinalActionAndPrefix(differentRangesAlmaRows, 'ADD');
-    this.applyFinalActionAndPrefix(differentRangesDoclineRows, 'DELETE');
-    this.applyFinalActionAndPrefix(deletedRows, 'DELETE');
-    this.applyFinalActionAndPrefix(inDoclineOnlyPreserveRows, '');
+  });
 
-    updateRows.forEach((row: any) => {
-      const nlm = this.safeString(row['nlm_unique_id']).replace(/^NLM_/, '');
+  this.applyFinalActionAndPrefix(addRows, 'ADD');
+  this.applyFinalActionAndPrefix(fullMatchRows, 'ADD');
+  this.applyFinalActionAndPrefix(differentRangesAlmaRows, 'ADD');
+  this.applyFinalActionAndPrefix(differentRangesDoclineRows, 'DELETE');
+  this.applyFinalActionAndPrefix(deletedRows, 'DELETE');
+  this.applyFinalActionAndPrefix(inDoclineOnlyPreserveRows, '');
 
-      if (nlm) {
-        row['nlm_unique_id'] = 'NLM_' + nlm;
+  updateRows.forEach((row: any) => {
+    const nlm = this.safeString(row['nlm_unique_id']).replace(/^NLM_/, '');
+
+    if (nlm) {
+      row['nlm_unique_id'] = 'NLM_' + nlm;
+    }
+
+    if (row['_update_source'] === 'DOCLINE') {
+      row['action'] = 'DELETE';
+    } else {
+      row['action'] = 'ADD';
+
+      if (this.safeString(row['end_year']) === '0' || row['end_year'] === 0) {
+        row['end_year'] = '';
       }
+    }
 
-      if (row['_update_source'] === 'DOCLINE') {
-        row['action'] = 'DELETE';
-      } else {
-        row['action'] = 'ADD';
+    delete row['_update_source'];
+  });
 
-        if (this.safeString(row['end_year']) === '0' || row['end_year'] === 0) {
-          row['end_year'] = '';
-        }
-      }
+  this.sortFinalRows(addRows);
+  this.sortFinalRows(fullMatchRows);
+  this.sortFinalRows(updateRows);
+  this.sortFinalRows(differentRangesAlmaRows);
+  this.sortFinalRows(differentRangesDoclineRows);
+  this.sortFinalRows(deletedRows);
+  this.sortFinalRows(inDoclineOnlyPreserveRows);
+  this.sortFinalRows(noDatesRows);
 
-      delete row['_update_source'];
-    });
+  const normalized = {
+    addRows: this.normalizeForFinalOutput(addRows),
+    fullMatchRows: this.normalizeForFinalOutput(fullMatchRows),
+    updateRows: this.normalizeForFinalOutput(updateRows),
+    differentRangesDoclineRows: this.normalizeForFinalOutput(differentRangesDoclineRows),
+    differentRangesAlmaRows: this.normalizeForFinalOutput(differentRangesAlmaRows),
+    deletedRows: this.normalizeForFinalOutput(deletedRows),
+    inDoclineOnlyPreserveRows: this.normalizeForFinalOutput(inDoclineOnlyPreserveRows),
+    noDatesRows: this.normalizeForFinalOutput(noDatesRows)
+  };
 
-    updateRows.sort((a: any, b: any) => {
-      const actionRank = (action: string): number => {
-        if (action === 'DELETE') {
-          return 0;
-        }
-        if (action === 'ADD') {
-          return 1;
-        }
-        return 2;
-      };
+  return {
+    ...normalized,
+    countsRows: this.buildCountsRowsFromSets(normalized)
+  };
+}
+  
 
-      const recordTypeRank = (recordType: string): number => {
-        if (recordType === 'HOLDING') {
-          return 0;
-        }
-        if (recordType === 'RANGE') {
-          return 1;
-        }
-        return 2;
-      };
-
-      const aAction = actionRank(this.safeString(a['action']));
-      const bAction = actionRank(this.safeString(b['action']));
-
-      if (aAction !== bAction) {
-        return aAction - bAction;
-      }
-
-      const aRecordType = recordTypeRank(this.safeString(a['record_type']));
-      const bRecordType = recordTypeRank(this.safeString(b['record_type']));
-
-      if (aRecordType !== bRecordType) {
-        return aRecordType - bRecordType;
-      }
-
-      const aKey = [
-        this.safeString(a['serial_title']),
-        this.safeString(a['nlm_unique_id']),
-        this.safeString(a['holdings_format']),
-        this.safeString(a['begin_year']),
-        this.safeString(a['end_year'])
-      ].join('||');
-
-      const bKey = [
-        this.safeString(b['serial_title']),
-        this.safeString(b['nlm_unique_id']),
-        this.safeString(b['holdings_format']),
-        this.safeString(b['begin_year']),
-        this.safeString(b['end_year'])
-      ].join('||');
-
-      return aKey.localeCompare(bKey);
-    });
-    this.sortFinalRows(addRows);
-    this.sortFinalRows(fullMatchRows);
-    this.sortFinalRows(updateRows);
-    this.sortFinalRows(differentRangesAlmaRows);
-    this.sortFinalRows(differentRangesDoclineRows);
-    this.sortFinalRows(deletedRows);
-    this.sortFinalRows(inDoclineOnlyPreserveRows);
-    this.sortFinalRows(noDatesRows);
-
-    const normalized = {
-      addRows: this.normalizeForFinalOutput(addRows),
-      fullMatchRows: this.normalizeForFinalOutput(fullMatchRows),
-      updateRows: this.normalizeForFinalOutput(updateRows),
-      differentRangesDoclineRows: this.normalizeForFinalOutput(differentRangesDoclineRows),
-      differentRangesAlmaRows: this.normalizeForFinalOutput(differentRangesAlmaRows),
-      deletedRows: this.normalizeForFinalOutput(deletedRows),
-      inDoclineOnlyPreserveRows: this.normalizeForFinalOutput(inDoclineOnlyPreserveRows),
-      noDatesRows: this.normalizeForFinalOutput(noDatesRows)
-    };
-
-    return {
-      ...normalized,
-      countsRows: this.buildCountsRowsFromSets(normalized)
-    };
-  }
 
   private groupByHoldingKey(rows: any[]): { [key: string]: any[] } {
     const grouped: { [key: string]: any[] } = {};
