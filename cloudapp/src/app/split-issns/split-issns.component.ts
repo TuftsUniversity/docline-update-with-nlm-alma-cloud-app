@@ -994,7 +994,7 @@ export class SplitIssnsComponent implements OnInit {
 
       const almaMissingDateRanges = almaRows.filter((row: any) =>
         this.safeString(row['record_type']) === 'RANGE' &&
-        !this.hasValue(row['begin_year'])
+        !this.hasValue(row['begin_year']) && !this.hasValue(row['begin_volume'])
       );
 
       Array.prototype.push.apply(noDatesRows, almaMissingDateRanges);
@@ -1034,6 +1034,11 @@ export class SplitIssnsComponent implements OnInit {
         if (this.safeString(row['end_year']) === '0' || row['end_year'] === 0) {
           row['end_year'] = '';
         }
+
+        if (this.safeString(row['begin_year']) === '0' || row['begin_year'] === 0) {
+          row['begin_year'] = '';
+        }
+
       }
 
       delete row['_update_source'];
@@ -1265,6 +1270,10 @@ export class SplitIssnsComponent implements OnInit {
         if (this.safeString(row['end_year']) === '0' || row['end_year'] === 0) {
           row['end_year'] = '';
         }
+
+        if (this.safeString(row['begin_year']) === '0' || row['begin_year'] === 0) {
+          row['begin_year'] = '';
+        } 
       }
     });
   }
@@ -1344,6 +1353,10 @@ export class SplitIssnsComponent implements OnInit {
           let value = row[key];
 
           if (trimmed === 'end_year' && (value === '0' || value === 0)) {
+            value = '';
+          }
+
+          if (trimmed === 'begin_year' && (value === '0' || value === 0)) {
             value = '';
           }
 
