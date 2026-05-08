@@ -212,8 +212,9 @@ export class SplitIssnsComponent implements OnInit {
       const propagatedConvertedRows = this.propagateHoldingValues(this.convertedRows);
 
       this.statusMessage = 'Merging overlapping RANGE intervals...';
-      this.finalRows = this.mergeIntervalsOptimized(propagatedConvertedRows);
-
+      this.finalRows = this.reconcileHoldingRowsFromRanges(
+        this.mergeIntervalsOptimized(propagatedConvertedRows)
+      );
       if (this.finalRows.length > 0) {
         this.previewColumns = Object.keys(this.finalRows[0]);
       }
@@ -921,6 +922,141 @@ export class SplitIssnsComponent implements OnInit {
     return outputRows;
   }
 
+
+
+
+private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
+  const output = rows.map((row: any) => this.cloneRow(row));
+  const grouped: { [key: string]: any[] } = {};
+
+  // IMPORTANT: group references to rows in output, not clones.
+  // groupByHoldingKey() clones rows, so using it here would mutate throwaway copies
+  // and none of the HOLDING/RANGE reconciliation would survive into finalRows.
+  output.forEach((row: any) => {
+    const nlm = this.safeString(row['nlm_unique_id']).replace(/^NLM_/, '');
+    const format = this.safeString(row['holdings_format']);
+    const key = [nlm, format].join('||');
+
+    if (!grouped[key]) {
+      grouped[key] = [];
+    }
+
+    grouped[key].push(row);
+  });
+
+  Object.keys(grouped).forEach((key: string) => {
+    const groupRows = grouped[key];
+
+    const holdingRows = groupRows.filter((row: any) =>
+      this.safeString(row['record_type']) === 'HOLDING'
+    );
+
+    const rangeRows = groupRows.filter((row: any) =>
+      this.safeString(row['record_type']) === 'RANGE'
+    );
+
+    if (!holdingRows.length || !rangeRows.length) {
+      return;
+    }
+
+    const holding = holdingRows[0];
+
+    rangeRows.forEach((range: any) => {
+      const hasEndYear = this.hasValue(range['end_year']);
+      range['currently_received'] = hasEndYear ? 'No' : 'Yes';
+    });
+
+    const hasOpenEndedRange = rangeRows.some((range: any) =>
+      !this.hasValue(range['end_year'])
+    );
+
+    if (hasOpenEndedRange) {
+      holding['currently_received'] = 'Yes';
+      holding['end_year'] = '';
+      holding['end_volume'] = '';
+
+      if (!this.hasValue(holding['begin_volume'])) {
+        const firstVolumeRange = rangeRows.find((range: any) =>
+          this.hasValue(range['begin_volume'])
+        );
+        holding['begin_volume'] = firstVolumeRange ? firstVolumeRange['begin_volume'] : '';
+      }
+
+      if (!this.hasValue(holding['begin_year'])) {
+        const firstYearRange = rangeRows
+          .filter((range: any) => this.hasValue(range['begin_year']))
+          .slice()
+          .sort((a: any, b: any) =>
+            this.safeInt(a['begin_year'], 9999) - this.safeInt(b['begin_year'], 9999)
+          )[0];
+
+        holding['begin_year'] = firstYearRange ? firstYearRange['begin_year'] : '';
+      }
+
+      return;
+    }
+
+    holding['currently_received'] = 'No';
+
+    const rangesWithYears = rangeRows.filter((range: any) =>
+      this.hasValue(range['begin_year']) || this.hasValue(range['end_year'])
+    );
+
+    if (!rangesWithYears.length) {
+      return;
+    }
+
+    const earliest = rangesWithYears.slice().sort((a: any, b: any) => {
+      const aYear = this.hasValue(a['begin_year'])
+        ? this.safeInt(a['begin_year'], 9999)
+        : this.safeInt(a['end_year'], 9999);
+
+      const bYear = this.hasValue(b['begin_year'])
+        ? this.safeInt(b['begin_year'], 9999)
+        : this.safeInt(b['end_year'], 9999);
+
+      return aYear - bYear;
+    })[0];
+
+    const latest = rangesWithYears.slice().sort((a: any, b: any) => {
+      const aYear = this.hasValue(a['end_year'])
+        ? this.safeInt(a['end_year'], 0)
+        : this.safeInt(a['begin_year'], 0);
+
+      const bYear = this.hasValue(b['end_year'])
+        ? this.safeInt(b['end_year'], 0)
+        : this.safeInt(b['begin_year'], 0);
+
+      return bYear - aYear;
+    })[0];
+
+    holding['begin_year'] = earliest['begin_year'] || earliest['end_year'] || '';
+    holding['end_year'] = latest['end_year'] || latest['begin_year'] || '';
+
+    holding['begin_volume'] =
+      earliest['begin_volume'] ||
+      earliest['end_volume'] ||
+      '1';
+
+    holding['end_volume'] =
+      latest['end_volume'] ||
+      latest['begin_volume'] ||
+      holding['begin_volume'] ||
+      '1';
+
+    rangeRows.forEach((range: any) => {
+      if (!this.hasValue(range['begin_volume'])) {
+        range['begin_volume'] = holding['begin_volume'];
+      }
+
+      if (!this.hasValue(range['end_volume'])) {
+        range['end_volume'] = holding['end_volume'];
+      }
+    });
+  });
+
+  return output;
+}
   private classifyOutputSets(
     currentAlmaCompressedRows: any[],
     existingDoclineForCompareRows: any[],
@@ -1038,7 +1174,6 @@ export class SplitIssnsComponent implements OnInit {
         if (this.safeString(row['begin_year']) === '0' || row['begin_year'] === 0) {
           row['begin_year'] = '';
         }
-
       }
 
       delete row['_update_source'];
