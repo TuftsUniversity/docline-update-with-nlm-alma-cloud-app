@@ -200,7 +200,12 @@ export class SplitIssnsComponent implements OnInit {
 
       this.mergedRows = this.dropDuplicatesByKeys(
         this.mergedRows,
-        ['nlm_unique_id', 'Electronic or Physical']
+        ['MMS Id', 'Electronic or Physical']
+      );
+
+      this.mergedRows = this.appendUnmatchedAlmaRowsForAdds(
+        explodedAnalyticsIssns,
+        this.mergedRows
       );
 
       const inferredChoice = this.inferChoiceFromAnalytics(this.analyticsRows);
@@ -778,10 +783,7 @@ export class SplitIssnsComponent implements OnInit {
     });
 
     output.forEach((row: any) => {
-      if (
-        this.safeString(row['record_type']) === 'HOLDING' &&
-        this.hasValue(row['nlm_unique_id'])
-      ) {
+      if (this.safeString(row['record_type']) === 'HOLDING') {
         columnsToUpdate.forEach((col: string) => {
           storedValues[col] = row[col];
         });
@@ -850,10 +852,7 @@ export class SplitIssnsComponent implements OnInit {
         return;
       }
 
-      if (
-        row['nlm_unique_id'] !== currentRow['nlm_unique_id'] ||
-        row['holdings_format'] !== currentRow['holdings_format']
-      ) {
+      if (this.getHoldingGroupKey(row) !== this.getHoldingGroupKey(currentRow)) {
         outputRows.push(currentRow);
         currentRow = row;
         return;
@@ -933,10 +932,9 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
   // groupByHoldingKey() clones rows, so using it here would mutate throwaway copies
   // and none of the HOLDING/RANGE reconciliation would survive into finalRows.
   output.forEach((row: any) => {
-    const nlm = this.safeString(row['nlm_unique_id']).replace(/^NLM_/, '');
-    const format = this.safeString(row['holdings_format']);
-    const key = [nlm, format].join('||');
 
+
+    const key = this.getHoldingGroupKey(row);
     if (!grouped[key]) {
       grouped[key] = [];
     }
@@ -1057,6 +1055,63 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
 
   return output;
 }
+
+  private appendUnmatchedAlmaRowsForAdds(
+      explodedAnalyticsIssns: any[],
+      mergedRows: any[]
+    ): any[] {
+      const matchedKeys = new Set<string>();
+
+      mergedRows.forEach((row: any) => {
+        matchedKeys.add([
+          this.safeString(row['MMS Id']),
+          this.safeString(row['Electronic or Physical'])
+        ].join('||'));
+      });
+
+      const seen = new Set<string>();
+      const unmatched: any[] = [];
+
+      explodedAnalyticsIssns.forEach((row: any) => {
+        const key = [
+          this.safeString(row['MMS Id']),
+          this.safeString(row['Electronic or Physical'])
+        ].join('||');
+
+        if (matchedKeys.has(key) || seen.has(key)) {
+          return;
+        }
+
+        seen.add(key);
+
+        const cloned = this.cloneRow(row);
+
+        cloned['NLM_Unique_ID'] = '';
+        cloned['ISSN_x'] = cloned['ISSN'];
+        cloned['Title_x'] = cloned['Title'];
+        cloned['docline_issns_full'] = this.safeString(cloned['ISSN']).replace(/;/g, ',');
+
+        unmatched.push(cloned);
+      });
+
+      return mergedRows.concat(unmatched);
+    }
+
+    private getHoldingGroupKey(row: any): string {
+    const nlm = this.safeString(row['nlm_unique_id']).replace(/^NLM_/, '');
+    const format = this.safeString(row['holdings_format']);
+
+    if (nlm) {
+      return [nlm, format].join('||');
+    }
+
+    return [
+      'NO_NLM',
+      format,
+      this.safeString(row['serial_title']),
+      this.normalizeIssnsForCompare(row['issns'])
+    ].join('||');
+  }
   private classifyOutputSets(
     currentAlmaCompressedRows: any[],
     existingDoclineForCompareRows: any[],
@@ -1276,12 +1331,10 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
 
   private groupByHoldingKey(rows: any[]): { [key: string]: any[] } {
     const grouped: { [key: string]: any[] } = {};
-
+    
     rows.forEach((row: any) => {
-      const nlm = this.safeString(row['nlm_unique_id']).replace(/^NLM_/, '');
-      const format = this.safeString(row['holdings_format']);
+      const key = this.getHoldingGroupKey(row);
 
-      const key = [nlm, format].join('||');
 
       if (!grouped[key]) {
         grouped[key] = [];
@@ -1290,6 +1343,7 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
       grouped[key].push(this.cloneRow(row));
     });
 
+    
     return grouped;
   }
 
@@ -1484,19 +1538,30 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
       Object.keys(row).forEach((key: string) => {
         const trimmed = String(key).trim();
 
-        if (!dropCols.has(trimmed)) {
-          let value = row[key];
+      if (!dropCols.has(trimmed)) {
+        let value = row[key];
 
-          if (trimmed === 'end_year' && (value === '0' || value === 0)) {
-            value = '';
-          }
+        const isHolding = this.safeString(row['record_type']) === 'HOLDING';
+        const isAdd = this.safeString(row['action']) === 'ADD';
 
-          if (trimmed === 'begin_year' && (value === '0' || value === 0)) {
-            value = '';
-          }
-
-          cleaned[trimmed] = value;
+        if (
+          isHolding &&
+          isAdd &&
+          ['begin_volume', 'end_volume', 'begin_year', 'end_year'].indexOf(trimmed) > -1
+        ) {
+          value = '';
         }
+
+        if (trimmed === 'end_year' && (value === '0' || value === 0)) {
+          value = '';
+        }
+
+        if (trimmed === 'begin_year' && (value === '0' || value === 0)) {
+          value = '';
+        }
+
+        cleaned[trimmed] = value;
+      }
       });
 
       return cleaned;
