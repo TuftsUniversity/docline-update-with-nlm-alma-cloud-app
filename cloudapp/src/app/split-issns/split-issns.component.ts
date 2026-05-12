@@ -105,7 +105,7 @@ export class SplitIssnsComponent implements OnInit {
 
   onSelectAnalytics(event: any): void {
     if (event && event.addedFiles && event.addedFiles.length > 0) {
-      this.analyticsFiles = this.analyticsFiles.concat(event.addedFiles);
+      this.analyticsFiles = [...event.addedFiles];
     }
   }
 
@@ -154,6 +154,8 @@ export class SplitIssnsComponent implements OnInit {
     this.finalRows = [];
     this.previewColumns = [];
     this.coverageParseErrorRows = [];
+    this.analyticsFiles = [];
+    this.doclineFiles = [];
 
     try {
       let analyticsRawRows: any[] = [];
