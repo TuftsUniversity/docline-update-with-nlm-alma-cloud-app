@@ -153,8 +153,8 @@ export class SplitIssnsComponent implements OnInit {
     // Snapshot the currently selected files before any processing begins.
     // This prevents accidental clearing/mutation of the live upload arrays
     // while async file reading is still running.
-    const analyticsFilesToProcess: File[] = [...this.analyticsFiles];
-    const doclineFileToProcess: File | undefined = this.doclineFiles[0];
+   const analyticsFilesToProcess: File[] = this.analyticsFiles.slice();    
+   const doclineFileToProcess: File | undefined = this.doclineFiles[0];
 
     if (!(doclineFileToProcess instanceof Blob)) {
       this.statusMessage = 'Invalid Docline file selected.';
@@ -196,6 +196,9 @@ export class SplitIssnsComponent implements OnInit {
       this.statusMessage = 'Normalizing current Docline holdings rows...';
       this.doclineRows = this.normalizeCurrentDoclineRows(doclineRawRows);
 
+     const inferredChoice =
+        this.inferChoiceFromAnalytics(this.analyticsRows);
+
       this.statusMessage = 'Propagating current Docline HOLDING values...';
 
       const propagatedCurrentDoclineRows = this.propagateHoldingValues(
@@ -204,14 +207,14 @@ export class SplitIssnsComponent implements OnInit {
 
       const doclineHoldingRows = propagatedCurrentDoclineRows.filter(
         (row: any) =>
-          this.safeString(row['record_type']) === 'HOLDING'
+          this.safeString(row['record_type']) === 'HOLDING' &&
+          this.safeString(row['holdings_format']) === inferredChoice
       );
 
       this.statusMessage = 'Exploding current Docline ISSNs...';
 
       const explodedDoclineHoldingIssns =
         this.explodeDoclineIssns(doclineHoldingRows);
-
       this.statusMessage = 'Grouping Analytics rows...';
 
       const groupedAnalytics =
@@ -232,28 +235,24 @@ export class SplitIssnsComponent implements OnInit {
       this.statusMessage =
         'Merging Analytics rows to current Docline holdings by ISSN...';
 
-      this.mergedRows = await this.innerJoinChunked(
-        explodedAnalyticsIssns.filter((row: any) =>
-          this.hasValue(row['ISSN'])
-        ),
-        'ISSN',
-        doclineIssnIndex,
-        'issn_exploded',
-        'ISSN'
-      );
+const matchedRows = await this.innerJoinChunked(
+  explodedAnalyticsIssns.filter((row: any) =>
+    this.hasValue(row['ISSN'])
+  ),
+  'ISSN',
+  doclineIssnIndex,
+  'issn_exploded',
+  'ISSN'
+);
 
-      this.mergedRows = this.dropDuplicatesByKeys(
-        this.mergedRows,
-        ['MMS Id', 'Electronic or Physical']
-      );
+this.mergedRows = matchedRows;
 
-      this.mergedRows = this.appendUnmatchedAlmaRowsForAdds(
-        explodedAnalyticsIssns,
-        this.mergedRows
-      );
+this.mergedRows = this.appendUnmatchedAlmaRowsForAdds(
+  groupedAnalytics,
+  this.mergedRows,
+  matchedRows
+);
 
-      const inferredChoice =
-        this.inferChoiceFromAnalytics(this.analyticsRows);
 
       this.statusMessage =
         'Converting merged rows into Docline HOLDING/RANGE rows...';
@@ -697,11 +696,19 @@ export class SplitIssnsComponent implements OnInit {
     const output: any[] = [];
 
     mergedRows.forEach((row: any) => {
-      let holdingsFormat = row['Electronic or Physical'];
+  let holdingsFormat = this.safeString(row['Electronic or Physical']);
 
-      if (holdingsFormat === 'Physical') {
-        holdingsFormat = 'Print';
-      }
+  if (holdingsFormat === 'Physical') {
+    holdingsFormat = 'Print';
+  }
+
+  if (choice === 'Electronic') {
+    holdingsFormat = 'Electronic';
+  }
+
+  if (choice === 'Print') {
+    holdingsFormat = 'Print';
+  }
 
       const covCombined =
         choice === 'Print'
@@ -1130,47 +1137,51 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
 }
 
   private appendUnmatchedAlmaRowsForAdds(
-      explodedAnalyticsIssns: any[],
-      mergedRows: any[]
-    ): any[] {
-      const matchedKeys = new Set<string>();
+    groupedAnalyticsRows: any[],
+    mergedRows: any[],
+    matchedRowsBeforeDedupe: any[]
+  ): any[] {
+    const matchedEntityKeys = new Set<string>();
 
-      mergedRows.forEach((row: any) => {
-        matchedKeys.add([
-          this.safeString(row['MMS Id']),
-          this.safeString(row['Electronic or Physical'])
-        ].join('||'));
-      });
+  matchedRowsBeforeDedupe.forEach((row: any) => {
+    matchedEntityKeys.add(
+      this.safeString(row['MMS Id'])
+    );
+  });
 
-      const seen = new Set<string>();
-      const unmatched: any[] = [];
+  const existingKeys = new Set<string>();
 
-      explodedAnalyticsIssns.forEach((row: any) => {
-        const key = [
-          this.safeString(row['MMS Id']),
-          this.safeString(row['Electronic or Physical'])
-        ].join('||');
+  mergedRows.forEach((row: any) => {
+    existingKeys.add(
+      this.safeString(row['MMS Id'])
+    );
+  });
 
-        if (matchedKeys.has(key) || seen.has(key)) {
-          return;
-        }
+  const unmatched: any[] = [];
 
-        seen.add(key);
+  groupedAnalyticsRows.forEach((row: any) => {
+    const key = this.safeString(row['MMS Id']);
 
-        const cloned = this.cloneRow(row);
-
-        cloned['NLM_Unique_ID'] = '';
-        cloned['ISSN_x'] = cloned['ISSN'];
-        cloned['Title_x'] = cloned['Title'];
-        cloned['docline_issns_full'] = this.safeString(cloned['ISSN']).replace(/;/g, ',');
-
-        unmatched.push(cloned);
-      });
-
-      return mergedRows.concat(unmatched);
+    if (matchedEntityKeys.has(key) || existingKeys.has(key)) {
+      return;
     }
 
-    private getHoldingGroupKey(row: any): string {
+    existingKeys.add(key);
+
+    const cloned = this.cloneRow(row);
+
+    cloned['NLM_Unique_ID'] = '';
+    cloned['ISSN_x'] = cloned['ISSN'];
+    cloned['Title_x'] = cloned['Title'];
+    cloned['docline_issns_full'] = this.safeString(cloned['ISSN']).replace(/;/g, ',');
+
+    unmatched.push(cloned);
+  });
+
+  return mergedRows.concat(unmatched);
+}
+
+  private getHoldingGroupKey(row: any): string {
     const nlm = this.safeString(row['nlm_unique_id']).replace(/^NLM_/, '');
     const format = this.safeString(row['holdings_format']);
 
@@ -1181,10 +1192,11 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
     return [
       'NO_NLM',
       format,
-      this.safeString(row['serial_title']),
+      this.safeString(row['MMS Id']),
       this.normalizeIssnsForCompare(row['issns'])
     ].join('||');
   }
+
   private classifyOutputSets(
     currentAlmaCompressedRows: any[],
     existingDoclineForCompareRows: any[],
