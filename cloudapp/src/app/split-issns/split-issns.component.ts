@@ -104,8 +104,11 @@ export class SplitIssnsComponent implements OnInit {
   ];
 
   onSelectAnalytics(event: any): void {
-    if (event && event.addedFiles && event.addedFiles.length > 0) {
-      this.analyticsFiles = [...event.addedFiles];
+    const files = (Array.from(event?.addedFiles || []) as any[])
+      .filter((f: any) => f instanceof File) as File[];
+
+    if (files.length > 0) {
+      this.analyticsFiles = files;
     }
   }
 
@@ -113,12 +116,14 @@ export class SplitIssnsComponent implements OnInit {
     this.analyticsFiles = this.analyticsFiles.filter(f => f !== file);
   }
 
-  onSelectDocline(event: any): void {
-    if (event && event.addedFiles && event.addedFiles.length > 0) {
-      this.doclineFiles = [event.addedFiles[0]];
-    }
-  }
+    onSelectDocline(event: any): void {
+      const files = (Array.from(event?.addedFiles || []) as any[])
+        .filter((f: any) => f instanceof File) as File[];
 
+      if (files.length > 0) {
+        this.doclineFiles = [files[0]];
+      }
+    }
   onRemoveDocline(file: File): void {
     this.doclineFiles = this.doclineFiles.filter(f => f !== file);
   }
@@ -140,13 +145,28 @@ export class SplitIssnsComponent implements OnInit {
 
   async handleUpload(): Promise<void> {
     if (!this.analyticsFiles.length || !this.doclineFiles.length) {
-      this.statusMessage = 'Please select one or more Analytics CSVs and one current Docline holdings CSV.';
+      this.statusMessage =
+        'Please select one or more Analytics CSVs and one current Docline holdings CSV.';
+      return;
+    }
+
+    // Snapshot the currently selected files before any processing begins.
+    // This prevents accidental clearing/mutation of the live upload arrays
+    // while async file reading is still running.
+    const analyticsFilesToProcess: File[] = [...this.analyticsFiles];
+    const doclineFileToProcess: File | undefined = this.doclineFiles[0];
+
+    if (!(doclineFileToProcess instanceof Blob)) {
+      this.statusMessage = 'Invalid Docline file selected.';
       return;
     }
 
     this.loading = true;
     this.statusMessage = 'Reading CSV files...';
     this.downloadUrl = '';
+
+    // Reset processing state ONLY.
+    // Do NOT clear uploaded file references here.
     this.analyticsRows = [];
     this.doclineRows = [];
     this.mergedRows = [];
@@ -154,18 +174,21 @@ export class SplitIssnsComponent implements OnInit {
     this.finalRows = [];
     this.previewColumns = [];
     this.coverageParseErrorRows = [];
-    this.analyticsFiles = [];
-    this.doclineFiles = [];
 
     try {
       let analyticsRawRows: any[] = [];
 
-      for (const file of this.analyticsFiles) {
+      for (const file of analyticsFilesToProcess) {
+        if (!(file instanceof Blob)) {
+          console.error('Invalid Analytics upload object:', file);
+          continue;
+        }
+
         const rows = await this.readCsvFile(file);
         analyticsRawRows = analyticsRawRows.concat(rows);
       }
 
-      const doclineRawRows = await this.readCsvFile(this.doclineFiles[0]);
+      const doclineRawRows = await this.readCsvFile(doclineFileToProcess);
 
       this.statusMessage = 'Normalizing Analytics rows...';
       this.analyticsRows = this.normalizeAnalyticsRows(analyticsRawRows);
@@ -174,26 +197,45 @@ export class SplitIssnsComponent implements OnInit {
       this.doclineRows = this.normalizeCurrentDoclineRows(doclineRawRows);
 
       this.statusMessage = 'Propagating current Docline HOLDING values...';
-      const propagatedCurrentDoclineRows = this.propagateHoldingValues(this.doclineRows);
 
-      const doclineHoldingRows = propagatedCurrentDoclineRows.filter((row: any) =>
-        this.safeString(row['record_type']) === 'HOLDING'
+      const propagatedCurrentDoclineRows = this.propagateHoldingValues(
+        this.doclineRows
       );
 
-      const explodedDoclineHoldingIssns = this.explodeDoclineIssns(doclineHoldingRows);
+      const doclineHoldingRows = propagatedCurrentDoclineRows.filter(
+        (row: any) =>
+          this.safeString(row['record_type']) === 'HOLDING'
+      );
+
+      this.statusMessage = 'Exploding current Docline ISSNs...';
+
+      const explodedDoclineHoldingIssns =
+        this.explodeDoclineIssns(doclineHoldingRows);
 
       this.statusMessage = 'Grouping Analytics rows...';
-      const groupedAnalytics = this.groupAnalyticsRows(this.analyticsRows);
+
+      const groupedAnalytics =
+        this.groupAnalyticsRows(this.analyticsRows);
 
       this.statusMessage = 'Exploding Analytics ISSNs...';
-      const explodedAnalyticsIssns = this.explodeAnalyticsIssns(groupedAnalytics);
+
+      const explodedAnalyticsIssns =
+        this.explodeAnalyticsIssns(groupedAnalytics);
 
       this.statusMessage = 'Building Docline ISSN lookup...';
-      const doclineIssnIndex = this.buildIndex(explodedDoclineHoldingIssns, 'issn_exploded');
 
-      this.statusMessage = 'Merging Analytics rows to current Docline holdings by ISSN...';
+      const doclineIssnIndex = this.buildIndex(
+        explodedDoclineHoldingIssns,
+        'issn_exploded'
+      );
+
+      this.statusMessage =
+        'Merging Analytics rows to current Docline holdings by ISSN...';
+
       this.mergedRows = await this.innerJoinChunked(
-        explodedAnalyticsIssns.filter((row: any) => this.hasValue(row['ISSN'])),
+        explodedAnalyticsIssns.filter((row: any) =>
+          this.hasValue(row['ISSN'])
+        ),
         'ISSN',
         doclineIssnIndex,
         'issn_exploded',
@@ -210,27 +252,41 @@ export class SplitIssnsComponent implements OnInit {
         this.mergedRows
       );
 
-      const inferredChoice = this.inferChoiceFromAnalytics(this.analyticsRows);
+      const inferredChoice =
+        this.inferChoiceFromAnalytics(this.analyticsRows);
 
-      this.statusMessage = 'Converting merged rows into Docline HOLDING/RANGE rows...';
-      this.convertedRows = this.convertToDoclineRows(this.mergedRows, inferredChoice);
+      this.statusMessage =
+        'Converting merged rows into Docline HOLDING/RANGE rows...';
 
-      this.statusMessage = 'Propagating HOLDING values into generated RANGE rows...';
-      const propagatedConvertedRows = this.propagateHoldingValues(this.convertedRows);
+      this.convertedRows = this.convertToDoclineRows(
+        this.mergedRows,
+        inferredChoice
+      );
 
-      this.statusMessage = 'Merging overlapping RANGE intervals...';
+      this.statusMessage =
+        'Propagating HOLDING values into generated RANGE rows...';
+
+      const propagatedConvertedRows =
+        this.propagateHoldingValues(this.convertedRows);
+
+      this.statusMessage =
+        'Merging overlapping RANGE intervals...';
+
       this.finalRows = this.reconcileHoldingRowsFromRanges(
         this.mergeIntervalsOptimized(propagatedConvertedRows)
       );
+
       if (this.finalRows.length > 0) {
         this.previewColumns = Object.keys(this.finalRows[0]);
       }
 
-      const normalizedCurrentDoclineCompareRows = this.normalizeCompareRows(
-        this.propagateHoldingValues(this.doclineRows)
-      );
+      const normalizedCurrentDoclineCompareRows =
+        this.normalizeCompareRows(
+          this.propagateHoldingValues(this.doclineRows)
+        );
 
-      const normalizedCurrentAlmaCompareRows = this.normalizeCompareRows(this.finalRows);
+      const normalizedCurrentAlmaCompareRows =
+        this.normalizeCompareRows(this.finalRows);
 
       this.statusMessage = 'Classifying output sets...';
 
@@ -251,12 +307,22 @@ export class SplitIssnsComponent implements OnInit {
       );
 
       this.statusMessage = 'Downloading ZIP package...';
-      this.downloadZipLocally(zipBlob, `${inferredChoice}_Docline_Output.zip`);
 
-      this.statusMessage = 'ZIP created and download triggered.';
+      this.downloadZipLocally(
+        zipBlob,
+        `${inferredChoice}_Docline_Output.zip`
+      );
+
+      // NOW it is safe to clear selected uploads.
+      this.analyticsFiles = [];
+      this.doclineFiles = [];
+
+      this.statusMessage =
+        'ZIP created and download triggered.';
     } catch (error) {
       console.error(error);
-      this.statusMessage = 'Error processing files. Check console.';
+      this.statusMessage =
+        'Error processing files. Check console.';
     } finally {
       this.loading = false;
     }
@@ -299,6 +365,11 @@ export class SplitIssnsComponent implements OnInit {
   }
 
   private async readCsvFile(file: File): Promise<any[]> {
+    if (!(file instanceof Blob)) {
+      console.error('readCsvFile received non-Blob:', file);
+      throw new Error('Invalid file upload object. Please remove and re-select the CSV file.');
+    }
+
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
 
@@ -1543,16 +1614,14 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
       if (!dropCols.has(trimmed)) {
         let value = row[key];
 
-        const isHolding = this.safeString(row['record_type']) === 'HOLDING';
-        const isAdd = this.safeString(row['action']) === 'ADD';
+      const isHolding = this.safeString(row['record_type']) === 'HOLDING';
 
-        if (
-          isHolding &&
-          isAdd &&
-          ['begin_volume', 'end_volume', 'begin_year', 'end_year'].indexOf(trimmed) > -1
-        ) {
-          value = '';
-        }
+      if (
+        isHolding &&
+        ['begin_volume', 'end_volume', 'begin_year', 'end_year'].indexOf(trimmed) > -1
+      ) {
+        value = '';
+      }
 
         if (trimmed === 'end_year' && (value === '0' || value === 0)) {
           value = '';
