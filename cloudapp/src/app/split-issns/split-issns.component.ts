@@ -12,6 +12,7 @@ import { AppSettings, DoclineConfig } from '../models/settings.model';
 export class SplitIssnsComponent implements OnInit {
   analyticsFiles: File[] = [];
   doclineFiles: File[] = [];
+  nlmFiles: File[] = [];
 
   loading = false;
   statusMessage = '';
@@ -128,6 +129,292 @@ export class SplitIssnsComponent implements OnInit {
     this.doclineFiles = this.doclineFiles.filter(f => f !== file);
   }
 
+  onSelectNlm(event: any): void {
+  const files = (Array.from(event?.addedFiles || []) as any[])
+    .filter((f: any) => f instanceof File) as File[];
+
+  if (files.length > 0) {
+    this.nlmFiles = [files[0]];
+  }
+}
+
+  onRemoveNlm(file: File): void {
+    this.nlmFiles = this.nlmFiles.filter(f => f !== file);
+  }
+
+
+  // private async readNlmMarcXmlFile(file: File): Promise<any[]> {
+  //   const text = await this.readTextFile(file);
+  //   const parser = new DOMParser();
+  //   const xml = parser.parseFromString(text, 'application/xml');
+
+  //   const records = Array.from(xml.getElementsByTagName('record'));
+
+  //   return records.map((record: Element) => {
+  //     const getControlField = (tag: string): string => {
+  //       const field = Array.from(record.getElementsByTagName('controlfield'))
+  //         .find((el: Element) => el.getAttribute('tag') === tag);
+  //       return field ? this.safeString(field.textContent) : '';
+  //     };
+
+  //     const getDataFields = (tag: string): Element[] =>
+  //       Array.from(record.getElementsByTagName('datafield'))
+  //         .filter((el: Element) => el.getAttribute('tag') === tag);
+
+  //     const getSubfields = (field: Element, code: string): string[] =>
+  //       Array.from(field.getElementsByTagName('subfield'))
+  //         .filter((el: Element) => el.getAttribute('code') === code)
+  //         .map((el: Element) => this.safeString(el.textContent));
+
+  //     const titleField = getDataFields('245')[0];
+  //     const title = titleField
+  //       ? this.safeString(getSubfields(titleField, 'a')[0]).replace(/[ /:;]+$/g, '')
+  //       : '';
+
+  //     const issns: string[] = [];
+  //     let printIssn = '';
+  //     let electronicIssn = '';
+
+  //     getDataFields('022').forEach((field: Element) => {
+  //       const issn = this.safeString(getSubfields(field, 'a')[0]);
+  //       const type = this.safeString(getSubfields(field, '7')[0]);
+
+  //       if (issn) {
+  //         issns.push(issn);
+  //       }
+
+  //       if (/Print/i.test(type)) {
+  //         printIssn = issn;
+  //       }
+
+  //       if (/Electronic/i.test(type)) {
+  //         electronicIssn = issn;
+  //       }
+  //     });
+
+  //     const oclcNumbers: string[] = [];
+
+  //     getDataFields('035').forEach((field: Element) => {
+  //       getSubfields(field, 'a').forEach((value: string) => {
+  //         const match = value.match(/\(OCoLC\)\s*(\d+)/i);
+  //         if (match) {
+  //           oclcNumbers.push(match[1]);
+  //         }
+  //       });
+  //     });
+
+  //     return {
+  //       Title: title,
+  //       NLM_Unique_ID: getControlField('001'),
+  //       OCLC_Number: Array.from(new Set(oclcNumbers)).join(';'),
+  //       Print_ISSN: printIssn,
+  //       Electronic_ISSN: electronicIssn,
+  //       ISSN: Array.from(new Set(issns)).join(',')
+  //     };
+  //   });
+  // }
+
+  private readTextFile(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsText(file);
+    });
+  }
+
+  private async readNlmMarcXmlFile(file: File): Promise<any[]> {
+    const MARC_NS = 'http://www.loc.gov/MARC21/slim';
+    const decoder = new TextDecoder('utf-8');
+    const reader = file.stream().getReader();
+
+    const nlmRows: any[] = [];
+    let buffer = '';
+
+    const parseRecord = (recordXml: string): any | null => {
+      const wrappedXml =
+        '<?xml version="1.0" encoding="UTF-8"?>' +
+        '<marc:collection xmlns:marc="http://www.loc.gov/MARC21/slim">' +
+        recordXml +
+        '</marc:collection>';
+
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(wrappedXml, 'application/xml');
+
+      if (xml.getElementsByTagName('parsererror').length > 0) {
+        return null;
+      }
+
+      const record = xml.getElementsByTagNameNS(MARC_NS, 'record')[0];
+
+      if (!record) {
+        return null;
+      }
+
+      const getControlField = (tag: string): string => {
+        const fields = Array.from(
+          record.getElementsByTagNameNS(MARC_NS, 'controlfield')
+        );
+
+        const field = fields.find((el: Element) =>
+          el.getAttribute('tag') === tag
+        );
+
+        return field ? this.safeString(field.textContent) : '';
+      };
+
+      const getDataFields = (tag: string): Element[] => {
+        return Array.from(
+          record.getElementsByTagNameNS(MARC_NS, 'datafield')
+        ).filter((el: Element) =>
+          el.getAttribute('tag') === tag
+        );
+      };
+
+      const getSubfields = (field: Element, code: string): string[] => {
+        return Array.from(
+          field.getElementsByTagNameNS(MARC_NS, 'subfield')
+        )
+          .filter((el: Element) => el.getAttribute('code') === code)
+          .map((el: Element) => this.safeString(el.textContent));
+      };
+
+      const titleField = getDataFields('245')[0];
+      const title = titleField
+        ? this.safeString(getSubfields(titleField, 'a')[0]).replace(/[ /:;.,]+$/g, '')
+        : '';
+
+      const issns: string[] = [];
+      let printIssn = '';
+      let electronicIssn = '';
+
+      getDataFields('022').forEach((field: Element) => {
+        const issn = this.safeString(getSubfields(field, 'a')[0]).toUpperCase();
+        const type = this.safeString(getSubfields(field, '7')[0]);
+
+        if (issn) {
+          issns.push(issn);
+        }
+
+        if (/Print/i.test(type)) {
+          printIssn = issn;
+        }
+
+        if (/Electronic/i.test(type)) {
+          electronicIssn = issn;
+        }
+      });
+
+      const oclcNumbers: string[] = [];
+
+      getDataFields('035').forEach((field: Element) => {
+        getSubfields(field, 'a').forEach((value: string) => {
+          const match = value.match(/\(OCoLC\)\s*(\d+)/i);
+
+          if (match && match[1]) {
+            oclcNumbers.push(match[1]);
+          }
+        });
+      });
+
+      return {
+        Title: title,
+        NLM_Unique_ID: getControlField('001'),
+        OCLC_Number: Array.from(new Set(oclcNumbers)).join(';'),
+        Print_ISSN: printIssn,
+        Electronic_ISSN: electronicIssn,
+        ISSN: Array.from(new Set(issns)).join(',')
+      };
+    };
+
+    while (true) {
+      const result = await reader.read();
+
+      if (result.done) {
+        break;
+      }
+
+      buffer += decoder.decode(result.value, { stream: true });
+
+      let endIndex = buffer.indexOf('</marc:record>');
+
+      while (endIndex !== -1) {
+        const recordEnd = endIndex + '</marc:record>'.length;
+        const recordXml = buffer.substring(0, recordEnd);
+
+        buffer = buffer.substring(recordEnd);
+
+        const startIndex = recordXml.indexOf('<marc:record');
+
+        if (startIndex !== -1) {
+          const cleanRecordXml = recordXml.substring(startIndex);
+          const parsed = parseRecord(cleanRecordXml);
+
+          if (parsed && parsed.NLM_Unique_ID) {
+            nlmRows.push(parsed);
+          }
+        }
+
+        endIndex = buffer.indexOf('</marc:record>');
+      }
+
+      if (nlmRows.length % 10000 === 0 && nlmRows.length > 0) {
+        console.log('Parsed NLM records:', nlmRows.length);
+      }
+    }
+
+    return nlmRows;
+  }
+  private splitAddsByNlmMatch(addRows: any[], nlmRows: any[]): {
+    enrichedAddRows: any[];
+    toAddButNotInNlmRows: any[];
+  } {
+  const nlmByIssn = new Map<string, any>();
+
+  nlmRows.forEach((row: any) => {
+    [
+      row['ISSN'],
+      row['Print_ISSN'],
+      row['Electronic_ISSN']
+    ].forEach((value: any) => {
+      this.normalizeIssnsForCompare(value)
+        .split(',')
+        .filter((issn: string) => !!issn)
+        .forEach((issn: string) => {
+          if (!nlmByIssn.has(issn)) {
+            nlmByIssn.set(issn, row);
+          }
+        });
+    });
+  });
+
+  const enrichedAddRows: any[] = [];
+  const toAddButNotInNlmRows: any[] = [];
+
+  addRows.forEach((row: any) => {
+    const rowIssns = this.normalizeIssnsForCompare(row['issns'])
+      .split(',')
+      .filter((issn: string) => !!issn);
+
+    const match = rowIssns
+      .map((issn: string) => nlmByIssn.get(issn))
+      .find((m: any) => !!m);
+
+    const cloned = this.cloneRow(row);
+
+    if (match && this.hasValue(match['NLM_Unique_ID'])) {
+      cloned['nlm_unique_id'] = 'NLM_' + this.safeString(match['NLM_Unique_ID']).replace(/^NLM_/, '');
+      enrichedAddRows.push(cloned);
+    } else {
+      toAddButNotInNlmRows.push(cloned);
+    }
+  });
+
+  return {
+    enrichedAddRows,
+    toAddButNotInNlmRows
+  };
+}
   private downloadZipLocally(zipBlob: Blob, fileName: string): void {
     const url = window.URL.createObjectURL(zipBlob);
     const a = document.createElement('a');
@@ -150,10 +437,7 @@ export class SplitIssnsComponent implements OnInit {
       return;
     }
 
-    // Snapshot the currently selected files before any processing begins.
-    // This prevents accidental clearing/mutation of the live upload arrays
-    // while async file reading is still running.
-    const analyticsFilesToProcess: File[] = [...this.analyticsFiles];
+    const analyticsFilesToProcess: File[] = this.analyticsFiles.slice();
     const doclineFileToProcess: File | undefined = this.doclineFiles[0];
 
     if (!(doclineFileToProcess instanceof Blob)) {
@@ -161,12 +445,15 @@ export class SplitIssnsComponent implements OnInit {
       return;
     }
 
-    this.loading = true;
-    this.statusMessage = 'Reading CSV files...';
-    this.downloadUrl = '';
 
-    // Reset processing state ONLY.
-    // Do NOT clear uploaded file references here.
+    //const analyticsFilesToProcess: File[] = this.analyticsFiles.slice();
+    //const doclineFileToProcess: File | undefined = this.doclineFiles[0];
+    const nlmFileToProcess: File | undefined =
+    this.nlmFiles.length > 0 ? this.nlmFiles[0] : undefined;
+     this.loading = true;
+     this.statusMessage = 'Reading CSV files...';
+     this.downloadUrl = '';
+
     this.analyticsRows = [];
     this.doclineRows = [];
     this.mergedRows = [];
@@ -196,6 +483,9 @@ export class SplitIssnsComponent implements OnInit {
       this.statusMessage = 'Normalizing current Docline holdings rows...';
       this.doclineRows = this.normalizeCurrentDoclineRows(doclineRawRows);
 
+      const inferredChoice =
+        this.inferChoiceFromAnalytics(this.analyticsRows);
+
       this.statusMessage = 'Propagating current Docline HOLDING values...';
 
       const propagatedCurrentDoclineRows = this.propagateHoldingValues(
@@ -204,7 +494,8 @@ export class SplitIssnsComponent implements OnInit {
 
       const doclineHoldingRows = propagatedCurrentDoclineRows.filter(
         (row: any) =>
-          this.safeString(row['record_type']) === 'HOLDING'
+          this.safeString(row['record_type']) === 'HOLDING' &&
+          this.safeString(row['holdings_format']) === inferredChoice
       );
 
       this.statusMessage = 'Exploding current Docline ISSNs...';
@@ -232,7 +523,7 @@ export class SplitIssnsComponent implements OnInit {
       this.statusMessage =
         'Merging Analytics rows to current Docline holdings by ISSN...';
 
-      this.mergedRows = await this.innerJoinChunked(
+      const matchedRows = await this.innerJoinChunked(
         explodedAnalyticsIssns.filter((row: any) =>
           this.hasValue(row['ISSN'])
         ),
@@ -242,18 +533,11 @@ export class SplitIssnsComponent implements OnInit {
         'ISSN'
       );
 
-      this.mergedRows = this.dropDuplicatesByKeys(
-        this.mergedRows,
-        ['MMS Id', 'Electronic or Physical']
-      );
-
       this.mergedRows = this.appendUnmatchedAlmaRowsForAdds(
-        explodedAnalyticsIssns,
-        this.mergedRows
+        groupedAnalytics,
+        matchedRows,
+        matchedRows
       );
-
-      const inferredChoice =
-        this.inferChoiceFromAnalytics(this.analyticsRows);
 
       this.statusMessage =
         'Converting merged rows into Docline HOLDING/RANGE rows...';
@@ -274,7 +558,10 @@ export class SplitIssnsComponent implements OnInit {
 
       this.finalRows = this.reconcileHoldingRowsFromRanges(
         this.mergeIntervalsOptimized(propagatedConvertedRows)
+
       );
+
+      
 
       if (this.finalRows.length > 0) {
         this.previewColumns = Object.keys(this.finalRows[0]);
@@ -290,11 +577,24 @@ export class SplitIssnsComponent implements OnInit {
 
       this.statusMessage = 'Classifying output sets...';
 
-      const classified = this.classifyOutputSets(
+      const classified: any = this.classifyOutputSets(
         normalizedCurrentAlmaCompareRows,
         normalizedCurrentDoclineCompareRows,
         inferredChoice
       );
+
+      classified.toAddButNotInNlmRows = [];
+
+if (nlmFileToProcess) {
+  const nlmRows = await this.readNlmMarcXmlFile(nlmFileToProcess);
+        const splitAdds = this.splitAddsByNlmMatch(
+          classified.addRows,
+          nlmRows
+        );
+
+        classified.addRows = splitAdds.enrichedAddRows;
+        classified.toAddButNotInNlmRows = splitAdds.toAddButNotInNlmRows;
+      }
 
       this.statusMessage = 'Building ZIP package...';
 
@@ -313,9 +613,9 @@ export class SplitIssnsComponent implements OnInit {
         `${inferredChoice}_Docline_Output.zip`
       );
 
-      // NOW it is safe to clear selected uploads.
       this.analyticsFiles = [];
       this.doclineFiles = [];
+      this.nlmFiles = [];
 
       this.statusMessage =
         'ZIP created and download triggered.';
@@ -697,9 +997,17 @@ export class SplitIssnsComponent implements OnInit {
     const output: any[] = [];
 
     mergedRows.forEach((row: any) => {
-      let holdingsFormat = row['Electronic or Physical'];
+      let holdingsFormat = this.safeString(row['Electronic or Physical']);
 
       if (holdingsFormat === 'Physical') {
+        holdingsFormat = 'Print';
+      }
+
+      if (choice === 'Electronic') {
+        holdingsFormat = 'Electronic';
+      }
+
+      if (choice === 'Print') {
         holdingsFormat = 'Print';
       }
 
@@ -750,7 +1058,9 @@ export class SplitIssnsComponent implements OnInit {
       coverageEntries.forEach((coverage: string, idx: number) => {
         const month = this.safeInt(embargoMonths[idx], 0);
         const year = this.safeInt(embargoYears[idx], 0);
-        const embargoPeriod = choice === 'Electronic' ? (month ? month : year * 12) : 0;
+        const embargoPeriod = choice === 'Electronic'
+          ? (month ? month : year * 12)
+          : 0;
 
         if (holdingsFormat === 'Print' && this.looksLikePhysicalStatement(coverage)) {
           const ranges = this.parsePhysicalRanges(coverage);
@@ -874,126 +1184,204 @@ export class SplitIssnsComponent implements OnInit {
     return output;
   }
 
-  private mergeIntervalsOptimized(rows: any[]): any[] {
-    const sortedRows = rows
-      .map((row: any) => this.cloneRow(row))
+private mergeIntervalsOptimized(rows: any[]): any[] {
+  const clonedRows = rows.map((row: any) => this.cloneRow(row));
+  const outputRows: any[] = [];
+  const rangeGroups: { [key: string]: any[] } = {};
+
+  clonedRows.forEach((row: any) => {
+    if (this.safeString(row['record_type']) === 'HOLDING') {
+      outputRows.push(row);
+      return;
+    }
+
+    const key = this.getHoldingGroupKey(row);
+
+    if (!rangeGroups[key]) {
+      rangeGroups[key] = [];
+    }
+
+    rangeGroups[key].push(row);
+  });
+
+  const numericValue = (value: any): number | null => {
+    if (!this.hasValue(value)) {
+      return null;
+    }
+
+    const match = this.safeString(value).match(/\d+/);
+    return match ? parseInt(match[0], 10) : null;
+  };
+
+  const minPresent = (values: any[]): any => {
+    const nums = values
+      .map((v: any) => numericValue(v))
+      .filter((v: number | null) => v !== null) as number[];
+
+    return nums.length ? Math.min.apply(null, nums) : '';
+  };
+
+  const maxPresent = (values: any[]): any => {
+    const nums = values
+      .map((v: any) => numericValue(v))
+      .filter((v: number | null) => v !== null) as number[];
+
+    return nums.length ? Math.max.apply(null, nums) : '';
+  };
+
+  const effectiveEnd = (row: any): number => {
+    if (!this.hasValue(row['end_year'])) {
+      return 10000;
+    }
+
+    const embargo = this.safeInt(row['embargo_period'], 0);
+    const endYear = this.safeInt(row['end_year'], 0);
+
+    return endYear - (embargo / 12.0);
+  };
+
+  const hasOpenEndedRange = (row: any): boolean =>
+    !this.hasValue(row['end_year']);
+
+  Object.keys(rangeGroups).forEach((key: string) => {
+    const groupRows = rangeGroups[key];
+
+    const openEndedRows = groupRows.filter((row: any) =>
+      hasOpenEndedRange(row)
+    );
+
+    if (openEndedRows.length > 0) {
+      const earliestBeginYear = minPresent(
+        groupRows.map((row: any) => row['begin_year'])
+      );
+
+      const earliestOpenEnded = openEndedRows
+        .slice()
+        .sort((a: any, b: any) =>
+          this.safeInt(a['begin_year'], 9999) -
+          this.safeInt(b['begin_year'], 9999)
+        )[0];
+
+      const collapsed = this.cloneRow(earliestOpenEnded);
+
+      collapsed['begin_year'] = earliestBeginYear;
+      collapsed['end_year'] = '';
+      collapsed['currently_received'] = 'Yes';
+
+      collapsed['begin_volume'] = minPresent(
+        groupRows.map((row: any) => row['begin_volume'])
+      );
+
+      collapsed['end_volume'] = '';
+
+      const bestEmbargoRow = openEndedRows
+        .slice()
+        .sort((a: any, b: any) =>
+          this.safeInt(a['embargo_period'], 0) -
+          this.safeInt(b['embargo_period'], 0)
+        )[0];
+
+      collapsed['embargo_period'] = bestEmbargoRow
+        ? bestEmbargoRow['embargo_period']
+        : collapsed['embargo_period'];
+
+      outputRows.push(collapsed);
+      return;
+    }
+
+    const sortedRanges = groupRows
+      .slice()
       .sort((a: any, b: any) => {
         const aKey = [
-          this.safeString(a['nlm_unique_id']),
-          this.safeString(a['holdings_format']),
-          this.safeString(a['record_type']),
           this.safeNumberForSort(a['begin_year']),
-          this.safeNumberForSort(a['end_year']),
+          this.safeNumberForSort(a['begin_volume']),
+          effectiveEnd(a),
+          this.safeNumberForSort(a['end_volume']),
           this.safeNumberForSort(a['embargo_period'])
         ].join('||');
 
         const bKey = [
-          this.safeString(b['nlm_unique_id']),
-          this.safeString(b['holdings_format']),
-          this.safeString(b['record_type']),
           this.safeNumberForSort(b['begin_year']),
-          this.safeNumberForSort(b['end_year']),
+          this.safeNumberForSort(b['begin_volume']),
+          effectiveEnd(b),
+          this.safeNumberForSort(b['end_volume']),
           this.safeNumberForSort(b['embargo_period'])
         ].join('||');
 
         return aKey.localeCompare(bKey);
       });
 
-    sortedRows.forEach((row: any) => {
-      if (row['record_type'] === 'RANGE' && !this.hasValue(row['end_year'])) {
-        row['end_year'] = 10000;
-      }
-    });
-
-    const outputRows: any[] = [];
     let currentRow: any = null;
 
-    const effectiveEnd = (row: any): number => {
-      const embargo = this.safeInt(row['embargo_period'], 0);
-      const endYear = this.safeInt(row['end_year'], 0);
-      return endYear - (embargo / 12.0);
-    };
-
-    sortedRows.forEach((row: any) => {
-      if (row['record_type'] === 'HOLDING') {
-        outputRows.push(row);
-        return;
-      }
-
+    sortedRanges.forEach((row: any) => {
       if (!currentRow) {
-        currentRow = row;
+        currentRow = this.cloneRow(row);
+        currentRow['_effective_end'] = effectiveEnd(currentRow);
         return;
       }
 
-      if (this.getHoldingGroupKey(row) !== this.getHoldingGroupKey(currentRow)) {
+      const currentEffectiveEnd = effectiveEnd(currentRow);
+      const rowBeginYear = this.safeInt(row['begin_year'], 0);
+      const yearsOverlapOrTouch =
+        rowBeginYear <= currentEffectiveEnd + 1;
+
+      if (!yearsOverlapOrTouch) {
+        delete currentRow['_effective_end'];
         outputRows.push(currentRow);
-        currentRow = row;
+
+        currentRow = this.cloneRow(row);
+        currentRow['_effective_end'] = effectiveEnd(currentRow);
         return;
       }
 
-      const overlapping =
-        this.safeInt(row['begin_year'], 0) <= this.safeInt(currentRow['end_year'], 0) + 1;
+      const currentEffective = effectiveEnd(currentRow);
+      const rowEffective = effectiveEnd(row);
 
-      const leftEff = effectiveEnd(row);
-      const rightEff = effectiveEnd(currentRow);
+      currentRow['begin_year'] = minPresent([
+        currentRow['begin_year'],
+        row['begin_year']
+      ]);
 
-      if (this.safeInt(row['begin_year'], 0) > this.safeInt(currentRow['end_year'], 0)) {
-        outputRows.push(currentRow);
-        currentRow = row;
-        return;
-      }
+      currentRow['begin_volume'] = minPresent([
+        currentRow['begin_volume'],
+        row['begin_volume']
+      ]);
 
-      if (overlapping && this.safeInt(row['end_year'], 0) === 10000) {
-        currentRow['end_year'] = 10000;
+      currentRow['end_volume'] = maxPresent([
+        currentRow['end_volume'],
+        row['end_volume'],
+        currentRow['begin_volume'],
+        row['begin_volume']
+      ]);
+
+      if (rowEffective > currentEffective) {
+        currentRow['end_year'] = row['end_year'];
         currentRow['embargo_period'] = row['embargo_period'];
-        return;
-      }
-
-      if (
-        overlapping &&
-        this.safeInt(row['embargo_period'], 0) === this.safeInt(currentRow['embargo_period'], 0)
-      ) {
-        currentRow['end_year'] = Math.max(
-          this.safeInt(currentRow['end_year'], 0),
-          this.safeInt(row['end_year'], 0)
-        );
-        return;
-      }
-
-      if (overlapping) {
-        if (leftEff > rightEff) {
+        currentRow['_effective_end'] = rowEffective;
+      } else if (Math.abs(rowEffective - currentEffective) < 0.0001) {
+        if (
+          this.safeInt(row['embargo_period'], 0) <
+          this.safeInt(currentRow['embargo_period'], 0)
+        ) {
           currentRow['end_year'] = row['end_year'];
           currentRow['embargo_period'] = row['embargo_period'];
-        } else if (Math.abs(leftEff - rightEff) < 0.0001) {
-          if (
-            this.safeInt(row['embargo_period'], 0) <
-            this.safeInt(currentRow['embargo_period'], 0)
-          ) {
-            currentRow['end_year'] = row['end_year'];
-            currentRow['embargo_period'] = row['embargo_period'];
-          }
+          currentRow['_effective_end'] = rowEffective;
         }
-        return;
       }
-
-      outputRows.push(currentRow);
-      currentRow = row;
     });
 
     if (currentRow) {
+      delete currentRow['_effective_end'];
+      currentRow['currently_received'] = this.hasValue(currentRow['end_year'])
+        ? 'No'
+        : 'Yes';
+
       outputRows.push(currentRow);
     }
+  });
 
-    outputRows.forEach((row: any) => {
-      if (row['record_type'] === 'RANGE' && this.safeInt(row['end_year'], 0) === 10000) {
-        row['currently_received'] = 'Yes';
-        row['end_year'] = '';
-      }
-    });
-
-    return outputRows;
-  }
-
+  return outputRows;
+}
 
 
 
@@ -1130,47 +1518,51 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
 }
 
   private appendUnmatchedAlmaRowsForAdds(
-      explodedAnalyticsIssns: any[],
-      mergedRows: any[]
-    ): any[] {
-      const matchedKeys = new Set<string>();
+    groupedAnalyticsRows: any[],
+    mergedRows: any[],
+    matchedRowsBeforeDedupe: any[]
+  ): any[] {
+    const matchedEntityKeys = new Set<string>();
 
-      mergedRows.forEach((row: any) => {
-        matchedKeys.add([
-          this.safeString(row['MMS Id']),
-          this.safeString(row['Electronic or Physical'])
-        ].join('||'));
-      });
+    matchedRowsBeforeDedupe.forEach((row: any) => {
+      matchedEntityKeys.add(
+        this.safeString(row['MMS Id'])
+      );
+    });
 
-      const seen = new Set<string>();
-      const unmatched: any[] = [];
+    const existingKeys = new Set<string>();
 
-      explodedAnalyticsIssns.forEach((row: any) => {
-        const key = [
-          this.safeString(row['MMS Id']),
-          this.safeString(row['Electronic or Physical'])
-        ].join('||');
+    mergedRows.forEach((row: any) => {
+      existingKeys.add(
+        this.safeString(row['MMS Id'])
+      );
+    });
 
-        if (matchedKeys.has(key) || seen.has(key)) {
-          return;
-        }
+    const unmatched: any[] = [];
 
-        seen.add(key);
+    groupedAnalyticsRows.forEach((row: any) => {
+      const key = this.safeString(row['MMS Id']);
 
-        const cloned = this.cloneRow(row);
+      if (matchedEntityKeys.has(key) || existingKeys.has(key)) {
+        return;
+      }
 
-        cloned['NLM_Unique_ID'] = '';
-        cloned['ISSN_x'] = cloned['ISSN'];
-        cloned['Title_x'] = cloned['Title'];
-        cloned['docline_issns_full'] = this.safeString(cloned['ISSN']).replace(/;/g, ',');
+      existingKeys.add(key);
 
-        unmatched.push(cloned);
-      });
+      const cloned = this.cloneRow(row);
 
-      return mergedRows.concat(unmatched);
-    }
+      cloned['NLM_Unique_ID'] = '';
+      cloned['ISSN_x'] = cloned['ISSN'];
+      cloned['Title_x'] = cloned['Title'];
+      cloned['docline_issns_full'] = this.safeString(cloned['ISSN']).replace(/;/g, ',');
 
-    private getHoldingGroupKey(row: any): string {
+      unmatched.push(cloned);
+    });
+
+    return mergedRows.concat(unmatched);
+  }
+
+  private getHoldingGroupKey(row: any): string {
     const nlm = this.safeString(row['nlm_unique_id']).replace(/^NLM_/, '');
     const format = this.safeString(row['holdings_format']);
 
@@ -1181,7 +1573,7 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
     return [
       'NO_NLM',
       format,
-      this.safeString(row['serial_title']),
+      this.safeString(row['MMS Id']),
       this.normalizeIssnsForCompare(row['issns'])
     ].join('||');
   }
@@ -1741,6 +2133,7 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
       noDatesRows: any[];
       countsRows: any[];
       coverageParseErrorRows: any[];
+      toAddButNotInNlmRows?: any[];
     }
   ): Promise<Blob> {
     const zip = new JSZip();
@@ -1782,7 +2175,18 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
 
     outputFolder.file(
       `${choice} Add Final.csv`,
-      this.rowsToCsv(this.projectDoclineColumns(outputSets.addRows), this.DOCLINE_COLUMNS)
+      this.rowsToCsv(
+        this.projectDoclineColumns(outputSets.addRows),
+        this.DOCLINE_COLUMNS
+      )
+    );
+
+    outputFolder.file(
+      `${choice} To Add But Not in NLM.csv`,
+      this.rowsToCsv(
+        this.projectDoclineColumns(outputSets.toAddButNotInNlmRows || []),
+        this.DOCLINE_COLUMNS
+      )
     );
 
     outputFolder.file(

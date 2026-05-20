@@ -67,6 +67,32 @@
 
 <br />
 
+<div class="upload-section">
+  <h3>Optional NLM Serials File</h3>
+  <p>
+    Upload MARCXML containing NLM serial records. If provided, Add Final rows
+    will be matched to NLM by ISSN and enriched with NLM Unique IDs.
+  </p>
+
+  <ngx-dropzone
+    [multiple]="false"
+    (change)="onSelectNlm($event)"
+  >
+    <ngx-dropzone-label>
+      Drag and drop the NLM serials MARCXML file here, or click to select.
+    </ngx-dropzone-label>
+
+    <ngx-dropzone-preview
+      *ngFor="let file of nlmFiles"
+      [removable]="true"
+      (removed)="onRemoveNlm(file)"
+    >
+      <ngx-dropzone-label>
+        {{ file.name }}
+      </ngx-dropzone-label>
+    </ngx-dropzone-preview>
+  </ngx-dropzone>
+</div>
 <!-- Status message -->
 <div *ngIf="statusMessage">
   <h3>Status</h3>
