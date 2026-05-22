@@ -585,16 +585,22 @@ export class SplitIssnsComponent implements OnInit {
 
       classified.toAddButNotInNlmRows = [];
 
-if (nlmFileToProcess) {
-  const nlmRows = await this.readNlmMarcXmlFile(nlmFileToProcess);
-        const splitAdds = this.splitAddsByNlmMatch(
-          classified.addRows,
-          nlmRows
-        );
+    if (nlmFileToProcess) {
+      const nlmRows = await this.readNlmMarcXmlFile(nlmFileToProcess);
 
-        classified.addRows = splitAdds.enrichedAddRows;
-        classified.toAddButNotInNlmRows = splitAdds.toAddButNotInNlmRows;
-      }
+      const splitAdds = this.splitAddsByNlmMatch(
+        classified.addRows,
+        nlmRows
+      );
+
+      classified.addRows = this.recompressAddRowsAfterNlmEnrichment(
+        splitAdds.enrichedAddRows
+      );
+
+      this.sortFinalRows(classified.addRows);
+
+      classified.toAddButNotInNlmRows = splitAdds.toAddButNotInNlmRows;
+    }
 
       this.statusMessage = 'Building ZIP package...';
 
@@ -628,6 +634,158 @@ if (nlmFileToProcess) {
     }
   }
 
+
+  private recompressAddRowsAfterNlmEnrichment(rows: any[]): any[] {
+  const propagated = this.propagateHoldingValues(
+    rows.map((row: any) => this.cloneRow(row))
+  );
+
+  const merged = this.mergeIntervalsOptimized(propagated);
+
+  const reconciled = this.reconcileHoldingRowsFromRanges(merged);
+
+    const rebuilt = this.rebuildHoldingsFromRanges(reconciled);
+
+    rebuilt.forEach((row: any) => {
+      row['action'] = 'ADD';
+      row['ignore_warnings'] = 'Yes';
+    });
+
+    const normalized = this.normalizeForFinalOutput(rebuilt);
+
+
+
+    
+  const cleaned = normalized.filter((row: any) => {
+    const recordType = this.safeString(row['record_type']);
+    const beginYear = this.safeInt(row['begin_year'], 0);
+    const endYear = this.safeInt(row['end_year'], 0);
+
+    if (recordType !== 'RANGE') {
+      return true;
+    }
+
+    if (!this.hasValue(row['begin_year']) && !this.hasValue(row['end_year'])) {
+      return false;
+    }
+
+    if (
+      this.hasValue(row['begin_year']) &&
+      this.hasValue(row['end_year']) &&
+      beginYear > endYear
+    ) {
+      return false;
+    }
+
+    return true;
+  });
+
+  const rangeKeys = new Set<string>();
+
+  cleaned.forEach((row: any) => {
+    if (this.safeString(row['record_type']) === 'RANGE') {
+      rangeKeys.add([
+        this.safeString(row['nlm_unique_id']),
+        this.safeString(row['holdings_format'])
+      ].join('||'));
+    }
+  });
+
+  const finalCleaned = cleaned.filter((row: any) => {
+    if (this.safeString(row['record_type']) !== 'HOLDING') {
+      return true;
+    }
+
+    const key = [
+      this.safeString(row['nlm_unique_id']),
+      this.safeString(row['holdings_format'])
+    ].join('||');
+
+    return rangeKeys.has(key);
+  });
+
+  this.sortFinalRows(finalCleaned);
+
+  return finalCleaned;
+}
+
+
+private rebuildHoldingsFromRanges(rows: any[]): any[] {
+  const rangeGroups: { [key: string]: any[] } = {};
+
+  rows.forEach((row: any) => {
+    if (this.safeString(row['record_type']) !== 'RANGE') {
+      return;
+    }
+
+    const key = [
+      this.safeString(row['nlm_unique_id']),
+      this.safeString(row['holdings_format'])
+    ].join('||');
+
+    if (!rangeGroups[key]) {
+      rangeGroups[key] = [];
+    }
+
+    rangeGroups[key].push(row);
+  });
+
+  const output: any[] = [];
+
+  Object.keys(rangeGroups).forEach((key: string) => {
+    const ranges = rangeGroups[key];
+
+    if (!ranges.length) {
+      return;
+    }
+
+    const firstRange = this.cloneRow(ranges[0]);
+    const hasOpenEnded = ranges.some((range: any) =>
+      !this.hasValue(range['end_year'])
+    );
+
+    const holding = this.cloneRow(firstRange);
+    holding['record_type'] = 'HOLDING';
+    holding['begin_volume'] = '';
+    holding['end_volume'] = '';
+    holding['begin_year'] = '';
+    holding['end_year'] = '';
+    holding['currently_received'] = hasOpenEnded ? 'Yes' : 'No';
+
+    output.push(holding);
+
+    ranges.forEach((range: any) => {
+      output.push(this.cloneRow(range));
+    });
+  });
+
+  return output;
+}
+  private collapseDuplicateHoldingRows(rows: any[]): any[] {
+  const seenHoldingKeys = new Set<string>();
+  const output: any[] = [];
+
+  rows.forEach((row: any) => {
+    if (this.safeString(row['record_type']) !== 'HOLDING') {
+      output.push(row);
+      return;
+    }
+
+    const key = [
+      this.safeString(row['nlm_unique_id']),
+      this.safeString(row['holdings_format'])
+    ].join('||');
+
+    if (seenHoldingKeys.has(key)) {
+      return;
+    }
+
+    seenHoldingKeys.add(key);
+    output.push(row);
+  });
+
+  return output;
+}
   private inferChoiceFromAnalytics(rows: any[]): 'Electronic' | 'Print' {
     const hasCoverage = rows.some((row: any) =>
       this.hasValue(row['Coverage Information Combined'])
@@ -1189,6 +1347,15 @@ private mergeIntervalsOptimized(rows: any[]): any[] {
   const outputRows: any[] = [];
   const rangeGroups: { [key: string]: any[] } = {};
 
+  const mergeIssns = (a: any, b: any): string => {
+      const parts = this.safeString(a)
+        .split(',')
+        .concat(this.safeString(b).split(','))
+        .map((v: string) => v.trim())
+        .filter((v: string) => !!v);
+
+      return Array.from(new Set(parts)).join(', ');
+    };
   clonedRows.forEach((row: any) => {
     if (this.safeString(row['record_type']) === 'HOLDING') {
       outputRows.push(row);
@@ -1274,6 +1441,15 @@ private mergeIntervalsOptimized(rows: any[]): any[] {
 
       collapsed['end_volume'] = '';
 
+      collapsed['issns'] = mergeIssns(
+        '',
+        groupRows
+          .map((row: any) => this.safeString(row['issns']))
+          .join(',')
+      );
+
+
+
       const bestEmbargoRow = openEndedRows
         .slice()
         .sort((a: any, b: any) =>
@@ -1333,6 +1509,8 @@ private mergeIntervalsOptimized(rows: any[]): any[] {
         currentRow['_effective_end'] = effectiveEnd(currentRow);
         return;
       }
+
+      currentRow['issns'] = mergeIssns(currentRow['issns'], row['issns']);
 
       const currentEffective = effectiveEnd(currentRow);
       const rowEffective = effectiveEnd(row);
@@ -2005,12 +2183,19 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
 
       if (!dropCols.has(trimmed)) {
         let value = row[key];
-
       const isHolding = this.safeString(row['record_type']) === 'HOLDING';
+      const isElectronic = this.safeString(row['holdings_format']) === 'Electronic';
 
       if (
         isHolding &&
         ['begin_volume', 'end_volume', 'begin_year', 'end_year'].indexOf(trimmed) > -1
+      ) {
+        value = '';
+      }
+
+      if (
+        isElectronic &&
+        ['begin_volume', 'end_volume'].indexOf(trimmed) > -1
       ) {
         value = '';
       }
