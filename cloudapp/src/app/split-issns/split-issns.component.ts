@@ -32,7 +32,7 @@ export class SplitIssnsComponent implements OnInit {
     libid: '',
     retention_policy: 'Permanently Retained',
     limited_retention_period: 0,
-    limited_retention_type: 'Years',
+    limited_retention_type: 'Months',
     has_epub_ahead_of_print: 'No',
     has_supplements: 'No',
     ignore_warnings: 'No'
@@ -74,7 +74,7 @@ export class SplitIssnsComponent implements OnInit {
         libid: '',
         retention_policy: 'Permanently Retained',
         limited_retention_period: 0,
-        limited_retention_type: 'Years',
+        limited_retention_type: 'Months',
         has_epub_ahead_of_print: 'No',
         has_supplements: 'No',
         ignore_warnings: 'No'
@@ -869,6 +869,22 @@ private rebuildHoldingsFromRanges(rows: any[]): any[] {
     return updatedRow;
   }
 
+  private csvEscape(value: any): string {
+    const text = this.cleanCsvText(value);
+
+    if (/[",\n\r]/.test(text)) {
+      return '"' + text.replace(/"/g, '""') + '"';
+    }
+
+    return text;
+  }
+  private cleanCsvText(value: any): string {
+    return this.safeString(value)
+      .replace(/\r?\n/g, ' ')
+      .replace(/\t/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
   private normalizeAnalyticsRows(rows: any[]): any[] {
     return rows.map((row: any) => {
       const out = this.cloneRow(row);
@@ -879,9 +895,7 @@ private rebuildHoldingsFromRanges(rows: any[]): any[] {
         out['Electronic or Physical'] = 'Print';
       }
 
-      out['Title'] = this.safeString(out['Title'])
-        .replace(/\.$/, '')
-        .replace(/^(.+?)(\s\:|$).*/, '$1');
+      out['Title'] = this.cleanCsvText(this.safeString(out['Title']));
 
       if (out['Electronic or Physical'] === 'Print') {
         out['Embargo Months'] = '';
@@ -1148,6 +1162,80 @@ private rebuildHoldingsFromRanges(rows: any[]): any[] {
     return output;
   }
 
+  private removeNoOpDeleteAddGroups(rows: any[]): any[] {
+    const groups: { [key: string]: any[] } = {};
+
+    const groupKey = (row: any): string => {
+      return [
+        this.safeString(row['nlm_unique_id']),
+        this.safeString(row['holdings_format']),
+        this.safeString(row['retention_policy']),
+        this.safeString(row['limited_retention_period']),
+        this.safeString(row['limited_retention_type'])
+      ].join('||');
+    };
+
+    const rowSignature = (row: any): string => {
+      return [
+        this.safeString(row['record_type']),
+        this.safeString(row['holdings_format']),
+        this.safeString(row['begin_volume']),
+        this.safeString(row['end_volume']),
+        this.safeString(row['begin_year']),
+        this.safeString(row['end_year']),
+        this.normalizeIssnsForCompare(row['issns']),
+        this.safeString(row['currently_received']),
+        this.safeString(row['retention_policy']),
+        this.safeString(row['limited_retention_period']),
+        this.safeString(row['limited_retention_type']),
+        this.safeString(row['embargo_period']),
+        this.safeString(row['has_epub_ahead_of_print']),
+        this.safeString(row['has_supplements'])
+      ].join('||');
+    };
+
+    rows.forEach((row: any) => {
+      const key = groupKey(row);
+
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+
+      groups[key].push(row);
+    });
+
+    const output: any[] = [];
+
+    Object.keys(groups).forEach((key: string) => {
+      const groupRows = groups[key];
+
+      const deleteRows = groupRows.filter((row: any) =>
+        this.safeString(row['action']) === 'DELETE'
+      );
+
+      const addRows = groupRows.filter((row: any) =>
+        this.safeString(row['action']) === 'ADD'
+      );
+
+      const deleteSignature = deleteRows
+        .map((row: any) => rowSignature(row))
+        .sort()
+        .join('\n');
+
+      const addSignature = addRows
+        .map((row: any) => rowSignature(row))
+        .sort()
+        .join('\n');
+
+      if (deleteRows.length && addRows.length && deleteSignature === addSignature) {
+        return;
+      }
+
+      Array.prototype.push.apply(output, groupRows);
+    });
+
+    return output;
+  }
   private convertToDoclineRows(
     mergedRows: any[],
     choice: 'Electronic' | 'Print'
@@ -1755,6 +1843,112 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
       this.normalizeIssnsForCompare(row['issns'])
     ].join('||');
   }
+
+  private cleanFinalUpdateRows(rows: any[]): any[] {
+    const seen = new Set<string>();
+
+    return rows.filter((row: any) => {
+      const recordType = this.safeString(row['record_type']);
+
+      if (recordType === 'RANGE') {
+        const beginYear = this.safeInt(row['begin_year'], 0);
+        const endYear = this.safeInt(row['end_year'], 0);
+
+        if (
+          this.hasValue(row['begin_year']) &&
+          this.hasValue(row['end_year']) &&
+          beginYear > endYear
+        ) {
+          return false;
+        }
+      }
+
+      const key = this.DOCLINE_COLUMNS
+        .map((col: string) => this.safeString(row[col]))
+        .join('||');
+
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    });
+  }
+
+  private removeAddGroupsWithoutDeleteFirst(rows: any[]): any[] {
+    const groups: { [key: string]: any[] } = {};
+
+    const baseKey = (row: any): string => {
+      return [
+        this.safeString(row['nlm_unique_id']),
+        this.safeString(row['holdings_format']),
+        this.safeString(row['retention_policy']),
+        this.safeString(row['limited_retention_period']),
+        this.safeString(row['limited_retention_type'])
+      ].join('||');
+    };
+
+    const hasHoldingAndRange = (groupRows: any[]): boolean => {
+      const hasHolding = groupRows.some((row: any) =>
+        this.safeString(row['record_type']) === 'HOLDING'
+      );
+
+      const hasRange = groupRows.some((row: any) =>
+        this.safeString(row['record_type']) === 'RANGE'
+      );
+
+      return hasHolding && hasRange;
+    };
+
+    rows.forEach((row: any) => {
+      const key = baseKey(row);
+
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+
+      groups[key].push(row);
+    });
+
+    const output: any[] = [];
+
+    Object.keys(groups).forEach((key: string) => {
+      const groupRows = groups[key];
+
+      const deleteRows = groupRows.filter((row: any) =>
+        this.safeString(row['action']) === 'DELETE'
+      );
+
+      const addRows = groupRows.filter((row: any) =>
+        this.safeString(row['action']) === 'ADD'
+      );
+
+      const otherRows = groupRows.filter((row: any) =>
+        this.safeString(row['action']) !== 'DELETE' &&
+        this.safeString(row['action']) !== 'ADD'
+      );
+
+      const addExists = addRows.length > 0;
+      const deleteCanRemoveExistingHolding = hasHoldingAndRange(deleteRows);
+
+      if (addExists && !deleteCanRemoveExistingHolding) {
+        // Do not submit ADD HOLDING/RANGE rows for an existing Docline holding
+        // unless the same holding group is being deleted first.
+        // This avoids "You already report holdings with this Format and Retention Policy".
+        Array.prototype.push.apply(output, deleteRows);
+        Array.prototype.push.apply(output, otherRows);
+        return;
+      }
+
+      Array.prototype.push.apply(output, deleteRows);
+      Array.prototype.push.apply(output, addRows);
+      Array.prototype.push.apply(output, otherRows);
+    });
+
+    return output;
+  }
+
   private classifyOutputSets(
     currentAlmaCompressedRows: any[],
     existingDoclineForCompareRows: any[],
@@ -1780,7 +1974,7 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
 
     const addRows: any[] = [];
     const fullMatchRows: any[] = [];
-    const updateRows: any[] = [];
+    let updateRows: any[] = [];
     const differentRangesDoclineRows: any[] = [];
     const differentRangesAlmaRows: any[] = [];
     const deletedRows: any[] = [];
@@ -1800,7 +1994,11 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
         const shouldDelete = this.shouldDeleteDoclineOnlyRows(doclineRows, choice);
 
         if (shouldDelete) {
-          Array.prototype.push.apply(deletedRows, doclineRows);
+          doclineRows.forEach((row: any) => {
+            const cloned = this.cloneRow(row);
+            cloned['_update_source'] = 'DOCLINE';
+            updateRows.push(cloned);
+          });
         } else {
           Array.prototype.push.apply(inDoclineOnlyPreserveRows, doclineRows);
         }
@@ -1811,15 +2009,24 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
       const almaSignature = this.buildRangeSignature(almaRows);
       const doclineSignature = this.buildRangeSignature(doclineRows);
 
-      const issnsCompatible =
-        almaRows.length === doclineRows.length &&
-        almaRows.every((almaRow: any, idx: number) => {
-          const doclineRow = doclineRows[idx];
-          return this.issnSetsCompatible(almaRow['issns'], doclineRow['issns']);
-        });
+      // const issnsCompatible =
+      //   almaRows.length === doclineRows.length &&
+      //   almaRows.every((almaRow: any, idx: number) => {
+      //     const doclineRow = doclineRows[idx];
+      //     return this.issnSetsCompatible(almaRow['issns'], doclineRow['issns']);
+      //   });
 
-      if (almaSignature === doclineSignature && issnsCompatible) {
+      if (almaSignature === doclineSignature) {
         Array.prototype.push.apply(fullMatchRows, almaRows);
+        return;
+      }
+
+      const partialDelete = this.buildPartialDeleteOnlyRows(almaRows, doclineRows);
+
+      if (partialDelete.canUsePartialDelete) {
+        Array.prototype.push.apply(fullMatchRows, partialDelete.matchedAlmaRows);
+        Array.prototype.push.apply(differentRangesDoclineRows, partialDelete.doclineRowsToDelete);
+        Array.prototype.push.apply(updateRows, partialDelete.updateRows);
         return;
       }
 
@@ -1828,12 +2035,20 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
 
       const almaMissingDateRanges = almaRows.filter((row: any) =>
         this.safeString(row['record_type']) === 'RANGE' &&
-        !this.hasValue(row['begin_year']) && !this.hasValue(row['begin_volume'])
+        !this.hasValue(row['begin_year']) &&
+        !this.hasValue(row['begin_volume'])
       );
 
       Array.prototype.push.apply(noDatesRows, almaMissingDateRanges);
 
       doclineRows.forEach((row: any) => {
+        if (this.deleteRowMissingRequiredRangeDetails(row)) {
+          this.coverageParseErrorRows.push(
+            this.buildDeleteRowException(row)
+          );
+          return;
+        }
+
         const cloned = this.cloneRow(row);
         cloned['_update_source'] = 'DOCLINE';
         updateRows.push(cloned);
@@ -1853,100 +2068,31 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
     this.applyFinalActionAndPrefix(deletedRows, 'DELETE');
     this.applyFinalActionAndPrefix(inDoclineOnlyPreserveRows, '');
 
-    updateRows.forEach((row: any) => {
-      const nlm = this.safeString(row['nlm_unique_id']).replace(/^NLM_/, '');
+  updateRows.forEach((row: any) => {
+    const nlm = this.safeString(row['nlm_unique_id']).replace(/^NLM_/, '');
 
-      if (nlm) {
-        row['nlm_unique_id'] = 'NLM_' + nlm;
-      }
+    if (nlm) {
+      row['nlm_unique_id'] = 'NLM_' + nlm;
+    }
 
-      if (row['_update_source'] === 'DOCLINE') {
-        row['action'] = 'DELETE';
-      } else {
-        row['action'] = 'ADD';
+    if (this.safeString(row['end_year']) === '0' || row['end_year'] === 0) {
+      row['end_year'] = '';
+    }
 
-        if (this.safeString(row['end_year']) === '0' || row['end_year'] === 0) {
-          row['end_year'] = '';
-        }
+    if (this.safeString(row['begin_year']) === '0' || row['begin_year'] === 0) {
+      row['begin_year'] = '';
+    }
 
-        if (this.safeString(row['begin_year']) === '0' || row['begin_year'] === 0) {
-          row['begin_year'] = '';
-        }
-      }
+    if (row['_update_source'] === 'DOCLINE') {
+      row['action'] = 'DELETE';
+    } else {
+      row['action'] = 'ADD';
+    }
 
-      delete row['_update_source'];
-    });
+    delete row['_update_source'];
+  });
 
-    updateRows.sort((a: any, b: any) => {
-      const nlmCompare = this.safeString(a['nlm_unique_id']).localeCompare(
-        this.safeString(b['nlm_unique_id'])
-      );
-
-      if (nlmCompare !== 0) {
-        return nlmCompare;
-      }
-
-      const formatCompare = this.safeString(a['holdings_format']).localeCompare(
-        this.safeString(b['holdings_format'])
-      );
-
-      if (formatCompare !== 0) {
-        return formatCompare;
-      }
-
-      const actionRank = (action: string): number => {
-        if (action === 'DELETE') {
-          return 0;
-        }
-
-        if (action === 'ADD') {
-          return 1;
-        }
-
-        return 2;
-      };
-
-      const actionCompare =
-        actionRank(this.safeString(a['action'])) -
-        actionRank(this.safeString(b['action']));
-
-      if (actionCompare !== 0) {
-        return actionCompare;
-      }
-
-      const recordTypeRank = (recordType: string): number => {
-        if (recordType === 'HOLDING') {
-          return 0;
-        }
-
-        if (recordType === 'RANGE') {
-          return 1;
-        }
-
-        return 2;
-      };
-
-      const recordTypeCompare =
-        recordTypeRank(this.safeString(a['record_type'])) -
-        recordTypeRank(this.safeString(b['record_type']));
-
-      if (recordTypeCompare !== 0) {
-        return recordTypeCompare;
-      }
-
-      const beginYearCompare = this.safeString(a['begin_year']).localeCompare(
-        this.safeString(b['begin_year'])
-      );
-
-      if (beginYearCompare !== 0) {
-        return beginYearCompare;
-      }
-
-      return this.safeString(a['end_year']).localeCompare(
-        this.safeString(b['end_year'])
-      );
-    });
-
+    updateRows = this.orderUpdateRowsForDocline(updateRows);
     this.sortFinalRows(addRows);
     this.sortFinalRows(fullMatchRows);
     this.sortFinalRows(differentRangesAlmaRows);
@@ -1954,11 +2100,19 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
     this.sortFinalRows(deletedRows);
     this.sortFinalRows(inDoclineOnlyPreserveRows);
     this.sortFinalRows(noDatesRows);
-
+    let preparedUpdateRows = this.collapseDuplicateAddHoldingRowsOnly(updateRows);
+    preparedUpdateRows = this.reconcileCurrentStatusForAddRowsOnly(preparedUpdateRows);
+    preparedUpdateRows = this.reconcileAddHoldingEmbargoFromRanges(preparedUpdateRows);
+    preparedUpdateRows = this.cleanFinalUpdateRows(preparedUpdateRows);
+    preparedUpdateRows = this.normalizeForFinalOutput(preparedUpdateRows);
+    preparedUpdateRows = this.removeNoOpDeleteAddGroups(preparedUpdateRows);
+    preparedUpdateRows = this.orderUpdateRowsForDocline(preparedUpdateRows);
     const normalized = {
       addRows: this.normalizeForFinalOutput(addRows),
       fullMatchRows: this.normalizeForFinalOutput(fullMatchRows),
-      updateRows: this.normalizeForFinalOutput(updateRows),
+      updateRows: preparedUpdateRows,
+
+      
       differentRangesDoclineRows: this.normalizeForFinalOutput(differentRangesDoclineRows),
       differentRangesAlmaRows: this.normalizeForFinalOutput(differentRangesAlmaRows),
       deletedRows: this.normalizeForFinalOutput(deletedRows),
@@ -1971,7 +2125,168 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
       countsRows: this.buildCountsRowsFromSets(normalized)
     };
   }
+  private collapseDuplicateAddHoldingRowsOnly(rows: any[]): any[] {
+    const seenHoldingKeys = new Set<string>();
+    const output: any[] = [];
 
+    rows.forEach((row: any) => {
+      const action = this.safeString(row['action']);
+      const recordType = this.safeString(row['record_type']);
+
+      if (action !== 'ADD' || recordType !== 'HOLDING') {
+        output.push(row);
+        return;
+      }
+
+      const key = [
+        action,
+        this.safeString(row['nlm_unique_id']),
+        this.safeString(row['holdings_format'])
+      ].join('||');
+
+      if (seenHoldingKeys.has(key)) {
+        return;
+      }
+
+      seenHoldingKeys.add(key);
+      output.push(row);
+    });
+
+    return output;
+  }
+
+  private reconcileCurrentStatusForAddRowsOnly(rows: any[]): any[] {
+    const output = rows.map((row: any) => this.cloneRow(row));
+
+    const addRows = output.filter((row: any) =>
+      this.safeString(row['action']) === 'ADD'
+    );
+
+    const reconciledAddRows = this.reconcileCurrentStatusWithinAction(addRows);
+
+    let addIndex = 0;
+
+    return output.map((row: any) => {
+      if (this.safeString(row['action']) !== 'ADD') {
+        return row;
+      }
+
+      const replacement = reconciledAddRows[addIndex];
+      addIndex += 1;
+      return replacement;
+    });
+  }
+  private orderUpdateRowsForDocline(rows: any[]): any[] {
+    const baseKey = (row: any): string => {
+      return [
+        this.safeString(row['nlm_unique_id']),
+        this.safeString(row['holdings_format']),
+        this.safeString(row['retention_policy']),
+        this.safeString(row['limited_retention_period']),
+        this.safeString(row['limited_retention_type'])
+      ].join('||');
+    };
+
+    const groups: { [key: string]: any[] } = {};
+
+    rows.forEach((row: any) => {
+      const key = baseKey(row);
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+      groups[key].push(row);
+    });
+
+    const sortedKeys = Object.keys(groups).sort((a: string, b: string) => {
+      const aFirst = groups[a][0];
+      const bFirst = groups[b][0];
+
+      return this.safeString(aFirst['nlm_unique_id']).localeCompare(
+        this.safeString(bFirst['nlm_unique_id'])
+      );
+    });
+
+    const output: any[] = [];
+
+    sortedKeys.forEach((key: string) => {
+      const groupRows = groups[key];
+
+      const pushBlock = (action: string): void => {
+        const actionRows = groupRows.filter((row: any) =>
+          this.safeString(row['action']) === action
+        );
+
+        const holdings = actionRows.filter((row: any) =>
+          this.safeString(row['record_type']) === 'HOLDING'
+        );
+
+        const ranges = actionRows
+          .filter((row: any) => this.safeString(row['record_type']) === 'RANGE')
+          .sort((a: any, b: any) => {
+            const beginYearCompare = this.safeString(a['begin_year']).localeCompare(
+              this.safeString(b['begin_year'])
+            );
+
+            if (beginYearCompare !== 0) {
+              return beginYearCompare;
+            }
+
+            return this.safeString(a['begin_volume']).localeCompare(
+              this.safeString(b['begin_volume'])
+            );
+          });
+
+        holdings.forEach((row: any) => output.push(row));
+        ranges.forEach((row: any) => output.push(row));
+      };
+
+      pushBlock('DELETE');
+      pushBlock('ADD');
+    });
+
+    return output;
+  }
+
+  private reconcileAddHoldingEmbargoFromRanges(rows: any[]): any[] {
+    const output = rows.map((row: any) => this.cloneRow(row));
+    const groups: { [key: string]: any[] } = {};
+
+    output.forEach((row: any) => {
+      if (this.safeString(row['action']) !== 'ADD') {
+        return;
+      }
+
+      const key = [
+        this.safeString(row['nlm_unique_id']),
+        this.safeString(row['holdings_format'])
+      ].join('||');
+
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+
+      groups[key].push(row);
+    });
+
+    Object.keys(groups).forEach((key: string) => {
+      const groupRows = groups[key];
+
+      const holding = groupRows.find((row: any) =>
+        this.safeString(row['record_type']) === 'HOLDING'
+      );
+
+      const rangeWithEmbargo = groupRows.find((row: any) =>
+        this.safeString(row['record_type']) === 'RANGE' &&
+        this.safeInt(row['embargo_period'], 0) > 0
+      );
+
+      if (holding && rangeWithEmbargo) {
+        holding['embargo_period'] = rangeWithEmbargo['embargo_period'];
+      }
+    });
+
+    return output;
+  }
   private groupByHoldingKey(rows: any[]): { [key: string]: any[] } {
     const grouped: { [key: string]: any[] } = {};
     
@@ -2032,18 +2347,146 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
   }
 
   private buildRangeSignature(rows: any[]): string {
-    const normalized = rows
-      .map((row: any) => ({
-        record_type: this.safeString(row['record_type']),
-        begin_volume: this.safeString(row['begin_volume']),
-        end_volume: this.safeString(row['end_volume']),
+    const normalizeYearForNumber = (value: any, openEndedValue: number): number => {
+      if (!this.hasValue(value)) {
+        return openEndedValue;
+      }
+
+      const normalized = this.normalizeCompareYear(value);
+
+      if (!normalized || normalized === '0') {
+        return openEndedValue;
+      }
+
+      return this.safeInt(normalized, openEndedValue);
+    };
+
+    const makeRangeSignatureObject = (row: any): any => {
+      const holdingsFormat = this.safeString(row['holdings_format']);
+      const isElectronic = holdingsFormat === 'Electronic';
+
+      return {
+        record_type: 'RANGE',
+        begin_volume: isElectronic ? '' : this.safeString(row['begin_volume']),
+        end_volume: isElectronic ? '' : this.safeString(row['end_volume']),
         begin_year: this.normalizeCompareYear(row['begin_year']),
-        end_year: this.normalizeCompareYear(row['end_year']),
+        end_year: this.hasValue(row['end_year'])
+          ? this.normalizeCompareYear(row['end_year'])
+          : '',
         embargo_period: this.safeString(row['embargo_period']),
-        currently_received: this.safeString(row['currently_received']),
-        holdings_format: this.safeString(row['holdings_format']),
+        currently_received: this.hasValue(row['end_year']) ? 'No' : 'Yes',
+        holdings_format: holdingsFormat,
         issns: this.normalizeIssnsForCompare(row['issns'])
-      }))
+      };
+    };
+
+    const rawRanges = rows
+      .filter((row: any) => this.safeString(row['record_type']) === 'RANGE')
+      .map((row: any) => makeRangeSignatureObject(row))
+      .filter((row: any) => row.begin_year !== '0' || row.end_year !== '0' || row.begin_volume || row.end_volume);
+
+    const rangeGroups: { [key: string]: any[] } = {};
+
+    rawRanges.forEach((row: any) => {
+      const key = [
+        row.holdings_format,
+        row.embargo_period,
+        row.issns,
+        row.begin_volume,
+        row.end_volume
+      ].join('||');
+
+      if (!rangeGroups[key]) {
+        rangeGroups[key] = [];
+      }
+
+      rangeGroups[key].push(row);
+    });
+
+    const canonicalRanges: any[] = [];
+
+    Object.keys(rangeGroups).forEach((key: string) => {
+      const sortedRanges = rangeGroups[key]
+        .slice()
+        .sort((a: any, b: any) => {
+          const aBegin = normalizeYearForNumber(a.begin_year, 0);
+          const bBegin = normalizeYearForNumber(b.begin_year, 0);
+
+          if (aBegin !== bBegin) {
+            return aBegin - bBegin;
+          }
+
+          const aEnd = normalizeYearForNumber(a.end_year, 10000);
+          const bEnd = normalizeYearForNumber(b.end_year, 10000);
+          return aEnd - bEnd;
+        });
+
+      let current: any = null;
+
+      sortedRanges.forEach((row: any) => {
+        const rowBegin = normalizeYearForNumber(row.begin_year, 0);
+        const rowEnd = normalizeYearForNumber(row.end_year, 10000);
+
+        if (!current) {
+          current = this.cloneRow(row);
+          return;
+        }
+
+        const currentEnd = normalizeYearForNumber(current.end_year, 10000);
+        const overlapsOrTouches = rowBegin <= currentEnd + 1;
+
+        if (!overlapsOrTouches) {
+          current.currently_received = this.hasValue(current.end_year) ? 'No' : 'Yes';
+          canonicalRanges.push(current);
+          current = this.cloneRow(row);
+          return;
+        }
+
+        if (rowEnd > currentEnd) {
+          current.end_year = row.end_year;
+        }
+
+        current.currently_received = this.hasValue(current.end_year) ? 'No' : 'Yes';
+      });
+
+      if (current) {
+        current.currently_received = this.hasValue(current.end_year) ? 'No' : 'Yes';
+        canonicalRanges.push(current);
+      }
+    });
+
+    const holdingsByFormat: { [key: string]: any } = {};
+
+    rows
+      .filter((row: any) => this.safeString(row['record_type']) === 'HOLDING')
+      .forEach((row: any) => {
+        const holdingsFormat = this.safeString(row['holdings_format']);
+        const formatRanges = canonicalRanges.filter((range: any) =>
+          range.holdings_format === holdingsFormat
+        );
+
+        const hasOpenEndedRange = formatRanges.some((range: any) =>
+          !this.hasValue(range.end_year)
+        );
+
+        holdingsByFormat[holdingsFormat] = {
+          record_type: 'HOLDING',
+          begin_volume: '',
+          end_volume: '',
+          begin_year: '0',
+          end_year: '0',
+          embargo_period: this.safeString(row['embargo_period']),
+          currently_received: hasOpenEndedRange
+            ? 'Yes'
+            : this.safeString(row['currently_received']),
+          holdings_format: holdingsFormat,
+          issns: this.normalizeIssnsForCompare(row['issns'])
+        };
+      });
+
+    const normalized = Object.keys(holdingsByFormat)
+      .map((key: string) => holdingsByFormat[key])
+      .concat(canonicalRanges)
       .sort((a: any, b: any) => {
         const aKey = [
           a.record_type,
@@ -2073,6 +2516,144 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
       });
 
     return JSON.stringify(normalized);
+  }
+
+
+  private makeExactRangeComparisonKey(row: any): string {
+    const holdingsFormat = this.safeString(row['holdings_format']);
+    const isElectronic = holdingsFormat === 'Electronic';
+
+    return [
+      holdingsFormat,
+      isElectronic ? '' : this.safeString(row['begin_volume']),
+      isElectronic ? '' : this.safeString(row['end_volume']),
+      this.hasValue(row['begin_year']) ? this.normalizeCompareYear(row['begin_year']) : '',
+      this.hasValue(row['end_year']) ? this.normalizeCompareYear(row['end_year']) : '',
+      this.safeString(row['retention_policy']),
+      this.safeString(row['limited_retention_period']),
+      this.safeString(row['limited_retention_type']),
+      this.safeString(row['embargo_period']),
+      this.safeString(row['has_epub_ahead_of_print']),
+      this.safeString(row['has_supplements']),
+      this.normalizeIssnsForCompare(row['issns'])
+    ].join('||');
+  }
+
+  private buildHoldingContextRow(rows: any[], source: 'ALMA' | 'DOCLINE'): any | null {
+    const holding = rows.find((row: any) =>
+      this.safeString(row['record_type']) === 'HOLDING'
+    );
+
+    const range = rows.find((row: any) =>
+      this.safeString(row['record_type']) === 'RANGE'
+    );
+
+    const sourceRow = holding || range;
+
+    if (!sourceRow) {
+      return null;
+    }
+
+    const cloned = this.cloneRow(sourceRow);
+    cloned['record_type'] = 'HOLDING';
+    cloned['begin_volume'] = '';
+    cloned['end_volume'] = '';
+    cloned['begin_year'] = '';
+    cloned['end_year'] = '';
+    cloned['_update_source'] = source;
+
+    return cloned;
+  }
+
+  private buildPartialDeleteOnlyRows(almaRows: any[], doclineRows: any[]): {
+    canUsePartialDelete: boolean;
+    updateRows: any[];
+    doclineRowsToDelete: any[];
+    matchedAlmaRows: any[];
+  } {
+    const almaRanges = almaRows.filter((row: any) =>
+      this.safeString(row['record_type']) === 'RANGE'
+    );
+
+    const doclineRanges = doclineRows.filter((row: any) =>
+      this.safeString(row['record_type']) === 'RANGE'
+    );
+
+    if (!almaRanges.length || !doclineRanges.length) {
+      return {
+        canUsePartialDelete: false,
+        updateRows: [],
+        doclineRowsToDelete: [],
+        matchedAlmaRows: []
+      };
+    }
+
+    const almaCounts = new Map<string, number>();
+    almaRanges.forEach((row: any) => {
+      const key = this.makeExactRangeComparisonKey(row);
+      almaCounts.set(key, (almaCounts.get(key) || 0) + 1);
+    });
+
+    const remainingAlmaCounts = new Map<string, number>(almaCounts);
+    const doclineRowsToDelete: any[] = [];
+    const matchedKeys = new Set<string>();
+
+    doclineRanges.forEach((row: any) => {
+      const key = this.makeExactRangeComparisonKey(row);
+      const remaining = remainingAlmaCounts.get(key) || 0;
+
+      if (remaining > 0) {
+        remainingAlmaCounts.set(key, remaining - 1);
+        matchedKeys.add(key);
+        return;
+      }
+
+      doclineRowsToDelete.push(row);
+    });
+
+    const hasAlmaRangesToAdd = Array.from(remainingAlmaCounts.values())
+      .some((count: number) => count > 0);
+
+    // This special path is intentionally delete-only. If Alma has ranges Docline
+    // does not have, fall back to the broader DELETE/ADD replacement behavior,
+    // because adding ranges to an existing Docline holding can trigger duplicate
+    // HOLDING validation unless the existing holding is removed first.
+    if (!doclineRowsToDelete.length || hasAlmaRangesToAdd) {
+      return {
+        canUsePartialDelete: false,
+        updateRows: [],
+        doclineRowsToDelete: [],
+        matchedAlmaRows: []
+      };
+    }
+
+    const holdingContext = this.buildHoldingContextRow(doclineRows, 'DOCLINE');
+    const updateRows: any[] = [];
+
+    if (holdingContext) {
+      updateRows.push(holdingContext);
+    }
+
+    doclineRowsToDelete.forEach((row: any) => {
+      const cloned = this.cloneRow(row);
+      cloned['_update_source'] = 'DOCLINE';
+      updateRows.push(cloned);
+    });
+
+    const matchedAlmaRows = almaRows.filter((row: any) => {
+      if (this.safeString(row['record_type']) === 'HOLDING') {
+        return true;
+      }
+
+      return matchedKeys.has(this.makeExactRangeComparisonKey(row));
+    });
+
+    return {
+      canUsePartialDelete: true,
+      updateRows,
+      doclineRowsToDelete,
+      matchedAlmaRows
+    };
   }
 
   private shouldDeleteDoclineOnlyRows(
@@ -2193,8 +2774,16 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
         value = '';
       }
 
+      const isAdd = this.safeString(row['action']) === 'ADD';
+      const isRange = this.safeString(row['record_type']) === 'RANGE';
+      const hasAnyYear =
+        this.hasValue(row['begin_year']) ||
+        this.hasValue(row['end_year']);
+
       if (
-        isElectronic &&
+        isAdd &&
+        isRange &&
+        hasAnyYear &&
         ['begin_volume', 'end_volume'].indexOf(trimmed) > -1
       ) {
         value = '';
@@ -2216,6 +2805,189 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
     });
   }
 
+    private reconcileCurrentStatusWithinAction(rows: any[]): any[] {
+    const output = rows.map((row: any) => this.cloneRow(row));
+    const groups: { [key: string]: any[] } = {};
+
+    output.forEach((row: any) => {
+      const key = [
+        this.safeString(row['action']),
+        this.safeString(row['nlm_unique_id']),
+        this.safeString(row['holdings_format'])
+      ].join('||');
+
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+
+      groups[key].push(row);
+    });
+
+    Object.keys(groups).forEach((key: string) => {
+      const groupRows = groups[key];
+
+      const ranges = groupRows.filter((row: any) =>
+        this.safeString(row['record_type']) === 'RANGE'
+      );
+
+      const holdings = groupRows.filter((row: any) =>
+        this.safeString(row['record_type']) === 'HOLDING'
+      );
+
+      if (!ranges.length || !holdings.length) {
+        return;
+      }
+
+      const hasOpenEndedRange = ranges.some((range: any) =>
+        !this.hasValue(range['end_year'])
+      );
+
+      holdings.forEach((holding: any) => {
+        holding['currently_received'] = hasOpenEndedRange ? 'Yes' : 'No';
+      });
+
+      ranges.forEach((range: any) => {
+        range['currently_received'] = this.hasValue(range['end_year'])
+          ? 'No'
+          : 'Yes';
+      });
+    });
+
+    return output;
+  }
+  private deleteRowMissingRequiredRangeDetails(row: any): boolean {
+    if (this.safeString(row['record_type']) !== 'RANGE') {
+      return false;
+    }
+
+    const currentlyReceived = this.safeString(row['currently_received']);
+
+  const hasMeaningfulValue = (value: any): boolean => {
+    const s = this.safeString(value);
+    return this.hasValue(s) && s !== '0';
+  };
+
+  const hasBegin =
+    hasMeaningfulValue(row['begin_year']) ||
+    hasMeaningfulValue(row['begin_volume']);
+
+  const hasEnd =
+    hasMeaningfulValue(row['end_year']) ||
+    hasMeaningfulValue(row['end_volume']);
+
+    if (!hasBegin) {
+      return true;
+    }
+
+    if (currentlyReceived === 'No' && !hasEnd) {
+      return true;
+    }
+
+    if (currentlyReceived === 'Yes' && hasEnd) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private removeAddHoldingsAlreadyReported(
+    rows: any[],
+    existingDoclineRows: any[]
+  ): any[] {
+    const existingHoldingKeys = new Set<string>();
+
+    const holdingKey = (row: any): string => {
+      return [
+        this.safeString(row['nlm_unique_id']).replace(/^NLM_/, ''),
+        this.safeString(row['holdings_format']),
+        this.safeString(row['retention_policy']),
+        this.safeString(row['limited_retention_period']),
+        this.safeString(row['limited_retention_type'])
+      ].join('||');
+    };
+
+    existingDoclineRows.forEach((row: any) => {
+      if (this.safeString(row['record_type']) !== 'HOLDING') {
+        return;
+      }
+
+      existingHoldingKeys.add(holdingKey(row));
+    });
+
+    return rows.filter((row: any) => {
+      if (
+        this.safeString(row['action']) !== 'ADD' ||
+        this.safeString(row['record_type']) !== 'HOLDING'
+      ) {
+        return true;
+      }
+
+      return !existingHoldingKeys.has(holdingKey(row));
+    });
+  }
+  private removeHoldingOnlyGroups(rows: any[]): any[] {
+    const groups: { [key: string]: any[] } = {};
+
+    rows.forEach((row: any) => {
+      const key = [
+        this.safeString(row['action']),
+        this.safeString(row['nlm_unique_id']),
+        this.safeString(row['holdings_format']),
+        this.safeString(row['retention_policy']),
+        this.safeString(row['limited_retention_period']),
+        this.safeString(row['limited_retention_type'])
+      ].join('||');
+
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+
+      groups[key].push(row);
+    });
+
+    const output: any[] = [];
+
+    Object.keys(groups).forEach((key: string) => {
+      const groupRows = groups[key];
+
+      const hasRange = groupRows.some((row: any) =>
+        this.safeString(row['record_type']) === 'RANGE'
+      );
+
+      if (!hasRange) {
+        return;
+      }
+
+      Array.prototype.push.apply(output, groupRows);
+    });
+
+    return output;
+  }
+  private buildDeleteRowException(row: any): any {
+    return {
+      action: this.safeString(row['action']) || 'DELETE',
+      record_type: this.safeString(row['record_type']),
+      serial_title: this.safeString(row['serial_title']),
+      nlm_unique_id: this.safeString(row['nlm_unique_id']),
+      holdings_format: this.safeString(row['holdings_format']),
+      begin_volume: this.safeString(row['begin_volume']),
+      end_volume: this.safeString(row['end_volume']),
+      begin_year: this.safeString(row['begin_year']),
+      end_year: this.safeString(row['end_year']),
+      issns: this.safeString(row['issns']),
+      currently_received: this.safeString(row['currently_received']),
+      retention_policy: this.safeString(row['retention_policy']),
+      limited_retention_period: this.safeString(row['limited_retention_period']),
+      limited_retention_type: this.safeString(row['limited_retention_type']),
+      embargo_period: this.safeString(row['embargo_period']),
+      has_epub_ahead_of_print: this.safeString(row['has_epub_ahead_of_print']),
+      has_supplements: this.safeString(row['has_supplements']),
+      ignore_warnings: this.safeString(row['ignore_warnings']),
+      last_modified: this.safeString(row['last_modified']),
+      coverage_statement: '',
+      error_message: 'DELETE RANGE row is missing both begin_year and begin_volume; row was excluded from Delete/Update output.'
+    };
+  }
   private buildCountsRowsFromSets(outputSets: {
     addRows: any[];
     fullMatchRows: any[];
@@ -2282,10 +3054,10 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
   }
 
   private rowsToCsv(rows: any[], columns: string[]): string {
-    const header = columns.join(',');
+    const header = columns.map((col: string) => this.csvEscape(col)).join(',');
 
     const lines = rows.map((row: any) => {
-      return columns.map((col: string) => this.escapeCsvValue(row[col])).join(',');
+      return columns.map((col: string) => this.csvEscape(row[col])).join(',');
     });
 
     return [header].concat(lines).join('\r\n');
@@ -2500,6 +3272,32 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
     };
   }
 
+    private collapseDuplicateHoldingRowsWithinAction(rows: any[]): any[] {
+    const seenHoldingKeys = new Set<string>();
+    const output: any[] = [];
+
+    rows.forEach((row: any) => {
+      if (this.safeString(row['record_type']) !== 'HOLDING') {
+        output.push(row);
+        return;
+      }
+
+      const key = [
+        this.safeString(row['action']),
+        this.safeString(row['nlm_unique_id']),
+        this.safeString(row['holdings_format'])
+      ].join('||');
+
+      if (seenHoldingKeys.has(key)) {
+        return;
+      }
+
+      seenHoldingKeys.add(key);
+      output.push(row);
+    });
+
+    return output;
+  }
   private parsePhysicalRanges(statement: string): any[] {
     if (!statement) {
       return [];

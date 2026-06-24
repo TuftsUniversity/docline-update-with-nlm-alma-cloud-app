@@ -10,8 +10,8 @@
                "style": "scss"
             }
          },
-         "root": "",
-         "sourceRoot": "src",
+         "root": "cloudapp",
+         "sourceRoot": "cloudapp/src",
          "prefix": "app",
          "architect": {
             "build": {
@@ -28,7 +28,7 @@
                      "src/assets"
                   ],
                   "styles": [
-                     "src/styles.scss"
+                     "src/main.scss"
                   ],
                   "scripts": [],
                   "allowedCommonJsDependencies": [
