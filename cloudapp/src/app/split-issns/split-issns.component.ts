@@ -3299,91 +3299,483 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
     return output;
   }
   private parsePhysicalRanges(statement: string): any[] {
-    if (!statement) {
-      return [];
-    }
-
-    const segments = statement
-      .split(/;\s*/)
-      .map((s: string) => s.trim())
-      .filter((s: string) => !!s);
-
-    const positiveSegments: string[] = [];
-    let inMissingBlock = false;
-
-    segments.forEach((rawSegment: string) => {
-      let seg = rawSegment.trim();
-
-      if (/^Missing:\s*/i.test(seg)) {
-        inMissingBlock = true;
-        seg = seg.replace(/^Missing:\s*/i, '').trim();
-      }
-
-      const hasYear = !!this.extractYear(seg);
-
-      if (inMissingBlock) {
-        if (!hasYear) {
-          return;
-        }
-
-        inMissingBlock = false;
-      }
-
-      if (seg) {
-        positiveSegments.push(seg);
-      }
-    });
-
-    if (!positiveSegments.length) {
+    if (!this.hasValue(statement)) {
       return [];
     }
 
     const ranges: any[] = [];
 
-    positiveSegments.forEach((seg: string) => {
-      if (seg.indexOf('-') > -1) {
-        const pieces = seg.split('-', 2);
-        const left = pieces[0];
-        const right = pieces[1] || '';
+    /*
+    * Normalize typography and common wording, but preserve commas and
+    * semicolons because they can identify separate holdings intervals.
+    */
+    const normalizedStatement = this.safeString(statement)
+      .replace(/[–—−]/g, '-')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\bthrough\b/gi, '-')
+      .replace(/\bthru\b/gi, '-')
+      .replace(/\bto date\b/gi, 'Current')
+      .replace(/\bto present\b/gi, 'Current')
+      .replace(/\bpresent\b/gi, 'Current')
+      .replace(/\bongoing\b/gi, 'Current')
+      .replace(/\s+/g, ' ')
+      .trim();
 
-        const beginYear = this.extractYear(left);
-        let endYear = this.extractYear(right);
+    if (!normalizedStatement) {
+      return [];
+    }
 
-        const openEnded = right.trim() === '' || /-\s*$/.test(seg);
-        if (openEnded) {
-          endYear = null;
+    /*
+    * Do not interpret explicitly missing holdings as owned holdings.
+    *
+    * Examples:
+    *   v.1-20 (1900-1920); Missing: v.5
+    *   v.1-20 (1900-1920), missing v.8-9
+    *
+    * If "Missing:" starts a segment, discard that segment.
+    * If it occurs inside a segment, retain only the text before it.
+    */
+    const segments: string[] = [];
+
+    normalizedStatement
+      .split(/;\s*/)
+      .map((value: string) => value.trim())
+      .filter((value: string) => !!value)
+      .forEach((rawSegment: string) => {
+        if (/^missing\s*:/i.test(rawSegment)) {
+          return;
         }
 
-        if (beginYear) {
-          ranges.push({
-            beginYear,
-            endYear
-          });
-        }
-      } else {
-        const y = this.extractYear(seg);
+        const missingIndex = rawSegment.search(/\bmissing\s*:/i);
 
-        if (y) {
-          ranges.push({
-            beginYear: y,
-            endYear: y
-          });
+        const positivePart = missingIndex >= 0
+          ? rawSegment.substring(0, missingIndex).trim()
+          : rawSegment;
+
+        if (positivePart) {
+          segments.push(positivePart);
+        }
+      });
+
+    if (!segments.length) {
+      return [];
+    }
+
+    const yearTokenPattern =
+      '(?:1[6-9]\\d{2}|20\\d{2})(?:\\s*\\/\\s*(?:\\d{2}|\\d{4}))?';
+
+    const currentPattern =
+      '(?:current|present|ongoing|latest)';
+
+    const volumeLabelPattern =
+      '(?:v(?:ol(?:ume)?)?|no|number)';
+
+    const firstYearFromToken = (value: any): string => {
+      const matches = this.safeString(value).match(/\d{4}/g);
+      return matches && matches.length ? matches[0] : '';
+    };
+
+    const lastYearFromToken = (value: any): string => {
+      const text = this.safeString(value);
+      const matches = text.match(/\d{2,4}/g);
+
+      if (!matches || !matches.length) {
+        return '';
+      }
+
+      const last = matches[matches.length - 1];
+
+      if (last.length === 4) {
+        return last;
+      }
+
+      /*
+      * Expand an abbreviated academic-year ending:
+      *
+      *   1999/00 -> 2000
+      *   2001/02 -> 2002
+      *   1907/08 -> 1908
+      */
+      const firstFourDigitMatch = text.match(/\d{4}/);
+
+      if (!firstFourDigitMatch) {
+        return '';
+      }
+
+      const firstYear = parseInt(firstFourDigitMatch[0], 10);
+      const abbreviatedEnd = parseInt(last, 10);
+      const century = Math.floor(firstYear / 100) * 100;
+
+      let expandedEnd = century + abbreviatedEnd;
+
+      if (expandedEnd < firstYear) {
+        expandedEnd += 100;
+      }
+
+      return String(expandedEnd);
+    };
+
+    const numericVolume = (value: any): string => {
+      const match = this.safeString(value).match(/\d+/);
+      return match ? match[0] : '';
+    };
+
+    const addRange = (
+      beginVolume: any,
+      endVolume: any,
+      beginYear: any,
+      endYear: any
+    ): void => {
+      const normalizedBeginVolume = numericVolume(beginVolume);
+      let normalizedEndVolume = numericVolume(endVolume);
+
+      const normalizedBeginYear = this.safeString(beginYear);
+      let normalizedEndYear =
+        endYear === null ? null : this.safeString(endYear);
+
+      if (
+        normalizedBeginVolume &&
+        normalizedEndVolume &&
+        this.safeInt(normalizedBeginVolume, 0) >
+          this.safeInt(normalizedEndVolume, 0)
+      ) {
+        const tempVolume = normalizedEndVolume;
+        normalizedEndVolume = normalizedBeginVolume;
+        beginVolume = tempVolume;
+      }
+
+      if (
+        normalizedBeginYear &&
+        normalizedEndYear &&
+        this.safeInt(normalizedBeginYear, 0) >
+          this.safeInt(normalizedEndYear, 0)
+      ) {
+        /*
+        * Do not reverse malformed years. Returning without adding the
+        * interval allows the original statement to reach parse errors
+        * rather than creating an invalid Docline RANGE.
+        */
+        return;
+      }
+
+      if (!normalizedBeginVolume && !normalizedBeginYear) {
+        return;
+      }
+
+      ranges.push({
+        beginVolume: normalizedBeginVolume,
+        endVolume: normalizedEndVolume,
+        beginYear: normalizedBeginYear,
+        endYear: normalizedEndYear
+      });
+    };
+
+    segments.forEach((segment: string) => {
+      let parsedSomething = false;
+
+      /*
+      * Case 1:
+      *
+      *   v.1-50 (1961-2010)
+      *   vol. 1-11 (1965-1975)
+      *   v.1-50 (1961/1962-2009/2010)
+      */
+      const volumeAndYearRangeRegex = new RegExp(
+        '\\b' +
+          volumeLabelPattern +
+          '\\.?\\s*(\\d+)\\s*-\\s*(\\d+)' +
+          '\\s*\\(\\s*(' +
+          yearTokenPattern +
+          ')\\s*-\\s*(' +
+          yearTokenPattern +
+          ')\\s*\\)',
+        'gi'
+      );
+
+      let match: RegExpExecArray | null;
+
+      while ((match = volumeAndYearRangeRegex.exec(segment)) !== null) {
+        addRange(
+          match[1],
+          match[2],
+          firstYearFromToken(match[3]),
+          lastYearFromToken(match[4])
+        );
+
+        parsedSomething = true;
+
+        if (volumeAndYearRangeRegex.lastIndex === match.index) {
+          volumeAndYearRangeRegex.lastIndex += 1;
+        }
+      }
+
+      /*
+      * Case 2:
+      *
+      *   v.1-50 (1961-Current)
+      *   v.1 (1969) - Current
+      *   v.19 (1983)-present
+      */
+      const volumeAndOpenYearRegex = new RegExp(
+        '\\b' +
+          volumeLabelPattern +
+          '\\.?\\s*(\\d+)' +
+          '(?:\\s*-\\s*(\\d+))?' +
+          '\\s*\\(\\s*(' +
+          yearTokenPattern +
+          ')\\s*\\)' +
+          '\\s*(?:-|to)?\\s*' +
+          currentPattern +
+          '\\b',
+        'gi'
+      );
+
+      while ((match = volumeAndOpenYearRegex.exec(segment)) !== null) {
+        addRange(
+          match[1],
+          '',
+          firstYearFromToken(match[3]),
+          null
+        );
+
+        parsedSomething = true;
+
+        if (volumeAndOpenYearRegex.lastIndex === match.index) {
+          volumeAndOpenYearRegex.lastIndex += 1;
+        }
+      }
+
+      /*
+      * Case 3:
+      *
+      *   v.1 (1969)
+      *   vol.50 (2010)
+      */
+      const singleVolumeAndYearRegex = new RegExp(
+        '\\b' +
+          volumeLabelPattern +
+          '\\.?\\s*(\\d+)' +
+          '\\s*\\(\\s*(' +
+          yearTokenPattern +
+          ')\\s*\\)',
+        'gi'
+      );
+
+      while ((match = singleVolumeAndYearRegex.exec(segment)) !== null) {
+        /*
+        * Avoid adding a closed single-year interval when this occurrence
+        * is immediately followed by "- Current". That was already handled
+        * by volumeAndOpenYearRegex.
+        */
+        const remainder = segment.substring(
+          match.index + match[0].length
+        );
+
+        if (/^\s*(?:-|to)?\s*(?:current|present|ongoing|latest)\b/i.test(remainder)) {
+          continue;
+        }
+
+        addRange(
+          match[1],
+          match[1],
+          firstYearFromToken(match[2]),
+          lastYearFromToken(match[2])
+        );
+
+        parsedSomething = true;
+
+        if (singleVolumeAndYearRegex.lastIndex === match.index) {
+          singleVolumeAndYearRegex.lastIndex += 1;
+        }
+      }
+
+      /*
+      * If the segment contained a volume-and-year expression, do not also
+      * create a second year-only RANGE from the years inside it.
+      */
+      if (parsedSomething) {
+        return;
+      }
+
+      /*
+      * Case 4:
+      *
+      *   1900-1901, 1903-1911, 1915-1916
+      *   (1928-1933, 1936-1937)
+      *   1907/1908-1921/1922
+      */
+      const closedYearRangeRegex = new RegExp(
+        '(' +
+          yearTokenPattern +
+          ')\\s*-\\s*(' +
+          yearTokenPattern +
+          ')',
+        'gi'
+      );
+
+      while ((match = closedYearRangeRegex.exec(segment)) !== null) {
+        addRange(
+          '',
+          '',
+          firstYearFromToken(match[1]),
+          lastYearFromToken(match[2])
+        );
+
+        parsedSomething = true;
+
+        if (closedYearRangeRegex.lastIndex === match.index) {
+          closedYearRangeRegex.lastIndex += 1;
+        }
+      }
+
+      /*
+      * Case 5:
+      *
+      *   1898-Current
+      *   2002/2003-current
+      *   1975-present
+      *   1975-
+      */
+      const openYearRangeRegex = new RegExp(
+        '(' +
+          yearTokenPattern +
+          ')\\s*-' +
+          '\\s*(?:' +
+          currentPattern +
+          ')?\\s*(?:[,.)]|$)',
+        'gi'
+      );
+
+      while ((match = openYearRangeRegex.exec(segment)) !== null) {
+        addRange(
+          '',
+          '',
+          firstYearFromToken(match[1]),
+          null
+        );
+
+        parsedSomething = true;
+
+        if (openYearRangeRegex.lastIndex === match.index) {
+          openYearRangeRegex.lastIndex += 1;
+        }
+      }
+
+      /*
+      * Case 6:
+      *
+      *   1961
+      *   (1961)
+      *   1961/1962
+      *
+      * Only treat it as a standalone year if no interval in this segment
+      * has already been identified.
+      */
+      if (!parsedSomething) {
+        const standaloneYearRegex = new RegExp(
+          '\\b(' + yearTokenPattern + ')\\b',
+          'i'
+        );
+
+        const standaloneYearMatch = standaloneYearRegex.exec(segment);
+
+        if (standaloneYearMatch) {
+          addRange(
+            '',
+            '',
+            firstYearFromToken(standaloneYearMatch[1]),
+            lastYearFromToken(standaloneYearMatch[1])
+          );
+
+          parsedSomething = true;
+        }
+      }
+
+      /*
+      * Case 7: volume-only holdings.
+      *
+      *   v.1-2
+      *   vols.19-21
+      *   no.1-5
+      *   number 51-61
+      */
+      if (!parsedSomething) {
+        const volumeOnlyRangeRegex = new RegExp(
+          '\\b' +
+            volumeLabelPattern +
+            's?\\.?\\s*(\\d+)\\s*-\\s*(\\d+)',
+          'gi'
+        );
+
+        while ((match = volumeOnlyRangeRegex.exec(segment)) !== null) {
+          addRange(
+            match[1],
+            match[2],
+            '',
+            ''
+          );
+
+          parsedSomething = true;
+
+          if (volumeOnlyRangeRegex.lastIndex === match.index) {
+            volumeOnlyRangeRegex.lastIndex += 1;
+          }
+        }
+      }
+
+      /*
+      * Case 8: single volume-only holdings.
+      *
+      *   v.19
+      *   no.51
+      */
+      if (!parsedSomething) {
+        const singleVolumeRegex = new RegExp(
+          '\\b' +
+            volumeLabelPattern +
+            '\\.?\\s*(\\d+)\\b',
+          'i'
+        );
+
+        const singleVolumeMatch = singleVolumeRegex.exec(segment);
+
+        if (singleVolumeMatch) {
+          addRange(
+            singleVolumeMatch[1],
+            singleVolumeMatch[1],
+            '',
+            ''
+          );
         }
       }
     });
 
-    return this.dedupeByKey(ranges, ['beginYear', 'endYear']);
+    return this.dedupeByKey(
+      ranges,
+      [
+        'beginVolume',
+        'endVolume',
+        'beginYear',
+        'endYear'
+      ]
+    );
   }
 
   private computeCurrentlyReceived(
     holdingsFormat: string,
     coverageCombined: string
   ): string {
-    if (holdingsFormat === 'Print' && this.looksLikePhysicalStatement(coverageCombined)) {
-      return /-\s*(;|$)/.test(coverageCombined) ? 'Yes' : 'No';
+    const coverage = this.safeString(coverageCombined);
+
+    if (holdingsFormat === 'Print') {
+      const explicitlyOpenEnded =
+        /\b(current|present|ongoing|latest)\b/i.test(coverage) ||
+        /-\s*(?:;|$)/.test(coverage);
+
+      return explicitlyOpenEnded ? 'Yes' : 'No';
     }
 
-    return /\buntil\b/i.test(coverageCombined) ? 'No' : 'Yes';
+    return /\buntil\b/i.test(coverage) ? 'No' : 'Yes';
   }
 
   private looksLikePhysicalStatement(s: string): boolean {
