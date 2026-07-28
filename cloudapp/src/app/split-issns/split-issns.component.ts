@@ -2100,24 +2100,53 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
     this.sortFinalRows(deletedRows);
     this.sortFinalRows(inDoclineOnlyPreserveRows);
     this.sortFinalRows(noDatesRows);
-    let preparedUpdateRows = this.collapseDuplicateAddHoldingRowsOnly(updateRows);
-    preparedUpdateRows = this.reconcileCurrentStatusForAddRowsOnly(preparedUpdateRows);
-    preparedUpdateRows = this.reconcileAddHoldingEmbargoFromRanges(preparedUpdateRows);
-    preparedUpdateRows = this.cleanFinalUpdateRows(preparedUpdateRows);
-    preparedUpdateRows = this.normalizeForFinalOutput(preparedUpdateRows);
-    preparedUpdateRows = this.removeNoOpDeleteAddGroups(preparedUpdateRows);
-    preparedUpdateRows = this.orderUpdateRowsForDocline(preparedUpdateRows);
+
+
+    let preparedUpdateRows =
+      this.collapseDuplicateAddHoldingRowsOnly(updateRows);
+
+    preparedUpdateRows =
+      this.reconcileCurrentStatusForAddRowsOnly(preparedUpdateRows);
+
+    preparedUpdateRows =
+      this.reconcileAddHoldingEmbargoFromRanges(preparedUpdateRows);
+
+    preparedUpdateRows =
+      this.cleanFinalUpdateRows(preparedUpdateRows);
+
+    preparedUpdateRows =
+      this.normalizeForFinalOutput(preparedUpdateRows);
+
+    preparedUpdateRows =
+      this.removeNoOpDeleteAddGroups(preparedUpdateRows);
+
+    /*
+    * This must happen after all final cleanup and normalization.
+    *
+    * Invalid replacement groups are removed atomically:
+    * DELETE HOLDING/RANGE and ADD HOLDING/RANGE are all excluded.
+    * An ERROR row is added to coverageParseErrorRows.
+    */
+    preparedUpdateRows =
+      this.removeInvalidReplacementGroupsFromUpdate(preparedUpdateRows);
+
+    preparedUpdateRows =
+      this.orderUpdateRowsForDocline(preparedUpdateRows);
+
     const normalized = {
       addRows: this.normalizeForFinalOutput(addRows),
       fullMatchRows: this.normalizeForFinalOutput(fullMatchRows),
       updateRows: preparedUpdateRows,
-
-      
-      differentRangesDoclineRows: this.normalizeForFinalOutput(differentRangesDoclineRows),
-      differentRangesAlmaRows: this.normalizeForFinalOutput(differentRangesAlmaRows),
-      deletedRows: this.normalizeForFinalOutput(deletedRows),
-      inDoclineOnlyPreserveRows: this.normalizeForFinalOutput(inDoclineOnlyPreserveRows),
-      noDatesRows: this.normalizeForFinalOutput(noDatesRows)
+      differentRangesDoclineRows:
+        this.normalizeForFinalOutput(differentRangesDoclineRows),
+      differentRangesAlmaRows:
+        this.normalizeForFinalOutput(differentRangesAlmaRows),
+      deletedRows:
+        this.normalizeForFinalOutput(deletedRows),
+      inDoclineOnlyPreserveRows:
+        this.normalizeForFinalOutput(inDoclineOnlyPreserveRows),
+      noDatesRows:
+        this.normalizeForFinalOutput(noDatesRows)
     };
 
     return {
@@ -3761,6 +3790,227 @@ private reconcileHoldingRowsFromRanges(rows: any[]): any[] {
     );
   }
 
+  private removeInvalidReplacementGroupsFromUpdate(rows: any[]): any[] {
+    const groups: { [key: string]: any[] } = {};
+
+    const groupKey = (row: any): string => {
+      return [
+        this.safeString(row['nlm_unique_id']).replace(/^NLM_/, ''),
+        this.safeString(row['holdings_format']),
+        this.safeString(row['retention_policy']),
+        this.safeString(row['limited_retention_period']),
+        this.safeString(row['limited_retention_type'])
+      ].join('||');
+    };
+
+    const isUsableRange = (row: any): boolean => {
+      if (this.safeString(row['record_type']) !== 'RANGE') {
+        return false;
+      }
+
+      const hasBeginYear = this.hasValue(row['begin_year']);
+      const hasBeginVolume = this.hasValue(row['begin_volume']);
+      const hasEndYear = this.hasValue(row['end_year']);
+      const hasEndVolume = this.hasValue(row['end_volume']);
+
+      /*
+      * A Docline RANGE is usable if it has either a starting year
+      * or a starting volume.
+      */
+      if (!hasBeginYear && !hasBeginVolume) {
+        return false;
+      }
+
+      /*
+      * Reject reversed year ranges.
+      */
+      if (
+        hasBeginYear &&
+        hasEndYear &&
+        this.safeInt(row['begin_year'], 0) >
+          this.safeInt(row['end_year'], 0)
+      ) {
+        return false;
+      }
+
+      /*
+      * Reject reversed volume ranges.
+      */
+      if (
+        hasBeginVolume &&
+        hasEndVolume &&
+        this.safeInt(row['begin_volume'], 0) >
+          this.safeInt(row['end_volume'], 0)
+      ) {
+        return false;
+      }
+
+      /*
+      * Closed holdings must have an ending year or ending volume.
+      *
+      * An open-ended RANGE is valid when currently_received is Yes.
+      */
+      const currentlyReceived =
+        this.safeString(row['currently_received']).toLowerCase();
+
+      if (
+        currentlyReceived === 'no' &&
+        !hasEndYear &&
+        !hasEndVolume
+      ) {
+        return false;
+      }
+
+      if (
+        currentlyReceived === 'yes' &&
+        (hasEndYear || hasEndVolume)
+      ) {
+        return false;
+      }
+
+      return true;
+    };
+
+    rows.forEach((row: any) => {
+      const key = groupKey(row);
+
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+
+      groups[key].push(row);
+    });
+
+    const output: any[] = [];
+
+    Object.keys(groups).forEach((key: string) => {
+      const groupRows = groups[key];
+
+      const deleteRows = groupRows.filter((row: any) =>
+        this.safeString(row['action']) === 'DELETE'
+      );
+
+      const addRows = groupRows.filter((row: any) =>
+        this.safeString(row['action']) === 'ADD'
+      );
+
+      /*
+      * A DELETE-only group is not a replacement operation.
+      * Preserve it.
+      */
+      if (!addRows.length) {
+        Array.prototype.push.apply(output, groupRows);
+        return;
+      }
+
+      const addHoldingRows = addRows.filter((row: any) =>
+        this.safeString(row['record_type']) === 'HOLDING'
+      );
+
+      const addRangeRows = addRows.filter((row: any) =>
+        this.safeString(row['record_type']) === 'RANGE'
+      );
+
+      const usableAddRangeRows = addRangeRows.filter((row: any) =>
+        isUsableRange(row)
+      );
+
+      const replacementIsValid =
+        addHoldingRows.length > 0 &&
+        usableAddRangeRows.length > 0;
+
+      if (replacementIsValid) {
+        /*
+        * Keep only usable ADD RANGE rows, along with the DELETE side
+        * and ADD HOLDING row.
+        */
+        Array.prototype.push.apply(output, deleteRows);
+        Array.prototype.push.apply(output, addHoldingRows);
+        Array.prototype.push.apply(output, usableAddRangeRows);
+
+        const otherAddRows = addRows.filter((row: any) => {
+          const recordType = this.safeString(row['record_type']);
+
+          return (
+            recordType !== 'HOLDING' &&
+            recordType !== 'RANGE'
+          );
+        });
+
+        Array.prototype.push.apply(output, otherAddRows);
+        return;
+      }
+
+      /*
+      * The replacement cannot be safely imported.
+      *
+      * Do not keep either the DELETE side or the ADD side. Keeping
+      * the DELETE rows would remove the institution's current holding
+      * without replacing it.
+      */
+      const representative =
+        addHoldingRows[0] ||
+        addRangeRows[0] ||
+        deleteRows[0] ||
+        groupRows[0];
+
+      const originalRangeSummary = addRangeRows
+        .map((range: any) => {
+          return [
+            `volume ${this.safeString(range['begin_volume'])}` +
+              `-${this.safeString(range['end_volume'])}`,
+            `year ${this.safeString(range['begin_year'])}` +
+              `-${this.safeString(range['end_year'])}`,
+            `currently_received=${this.safeString(range['currently_received'])}`
+          ].join('; ');
+        })
+        .join(' | ');
+
+      this.coverageParseErrorRows.push({
+        action: '',
+        record_type: 'ERROR',
+        serial_title: this.safeString(representative['serial_title']),
+        nlm_unique_id: this.safeString(representative['nlm_unique_id']),
+        holdings_format: this.safeString(representative['holdings_format']),
+        begin_volume: '',
+        end_volume: '',
+        begin_year: '',
+        end_year: '',
+        issns: this.safeString(representative['issns']),
+        currently_received: '',
+        retention_policy: this.safeString(
+          representative['retention_policy']
+        ),
+        limited_retention_period: this.safeString(
+          representative['limited_retention_period']
+        ),
+        limited_retention_type: this.safeString(
+          representative['limited_retention_type']
+        ),
+        embargo_period: this.safeString(
+          representative['embargo_period']
+        ),
+        has_epub_ahead_of_print: this.safeString(
+          representative['has_epub_ahead_of_print']
+        ),
+        has_supplements: this.safeString(
+          representative['has_supplements']
+        ),
+        ignore_warnings: this.safeString(
+          representative['ignore_warnings']
+        ),
+        last_modified: '',
+        coverage_statement: originalRangeSummary,
+        error_message:
+          'Update group was removed because the replacement ADD holding ' +
+          'did not contain a usable RANGE after final processing. The ' +
+          'corresponding DELETE rows were also removed to prevent deletion ' +
+          'of the existing Docline holding without a valid replacement.'
+      });
+    });
+
+    return output;
+  }
   private computeCurrentlyReceived(
     holdingsFormat: string,
     coverageCombined: string
