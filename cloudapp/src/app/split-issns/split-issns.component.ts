@@ -1236,6 +1236,293 @@ private rebuildHoldingsFromRanges(rows: any[]): any[] {
 
     return output;
   }
+
+  private volumeYearsAlign(sourceRanges: any[]): boolean {
+    if (!sourceRanges || sourceRanges.length === 0) {
+      return false;
+    }
+
+    const toNumber = (value: any): number | null => {
+      if (!this.hasValue(value)) {
+        return null;
+      }
+
+      const match = this.safeString(value).match(/\d+/);
+
+      if (!match) {
+        return null;
+      }
+
+      const parsed = parseInt(match[0], 10);
+
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const normalized = sourceRanges.map((range: any) => ({
+      beginYear: toNumber(range['begin_year']),
+      endYear: toNumber(range['end_year']),
+      beginVolume: toNumber(range['begin_volume']),
+      endVolume: toNumber(range['end_volume'])
+    }));
+
+    /*
+    * RULE 1
+    *
+    * Every range must at least have a begin year and begin volume.
+    *
+    * If one constituent range is:
+    *
+    *   1990-1995
+    *
+    * while the others have volumes, then we cannot prove what volumes
+    * correspond to 1990-1995.
+    */
+    if (
+      normalized.some((range: any) =>
+        range.beginYear === null ||
+        range.beginVolume === null
+      )
+    ) {
+      return false;
+    }
+
+    /*
+    * RULE 2
+    *
+    * A closed year range must also have a closed volume range,
+    * and vice versa.
+    *
+    * We don't want:
+    *
+    *   v.1-? (1980-1989)
+    *
+    * or
+    *
+    *   v.1-10 (1980-?)
+    *
+    * contributing to a supposedly aligned closed range.
+    */
+    if (
+      normalized.some((range: any) => {
+        const yearClosed = range.endYear !== null;
+        const volumeClosed = range.endVolume !== null;
+
+        return yearClosed !== volumeClosed;
+      })
+    ) {
+      return false;
+    }
+
+    /*
+    * RULE 3
+    *
+    * Individual ranges cannot run backwards.
+    */
+    if (
+      normalized.some((range: any) =>
+        (
+          range.endYear !== null &&
+          range.beginYear! > range.endYear
+        ) ||
+        (
+          range.endVolume !== null &&
+          range.beginVolume! > range.endVolume
+        )
+      )
+    ) {
+      return false;
+    }
+
+    /*
+    * Put the original ranges into chronological order.
+    */
+    const sorted = normalized
+      .slice()
+      .sort((a: any, b: any) => {
+        if (a.beginYear !== b.beginYear) {
+          return a.beginYear! - b.beginYear!;
+        }
+
+        return a.beginVolume! - b.beginVolume!;
+      });
+
+    /*
+    * RULE 4
+    *
+    * There can only be one open-ended range, and it must be the
+    * chronological last range.
+    */
+    const openEndedIndexes = sorted
+      .map((range: any, index: number) =>
+        range.endYear === null ? index : -1
+      )
+      .filter((index: number) => index !== -1);
+
+    if (openEndedIndexes.length > 1) {
+      return false;
+    }
+
+    if (
+      openEndedIndexes.length === 1 &&
+      openEndedIndexes[0] !== sorted.length - 1
+    ) {
+      return false;
+    }
+
+    /*
+    * Compare every adjacent pair.
+    */
+    for (let i = 1; i < sorted.length; i++) {
+      const previous = sorted[i - 1];
+      const current = sorted[i];
+
+      /*
+      * RULE 5
+      *
+      * Years must progress forward.
+      *
+      * If two different volume ranges begin in exactly the same year,
+      * we cannot safely infer one continuous volume/year relationship.
+      *
+      * Example:
+      *
+      *   v.1-10  (1990-1995)
+      *   v.11-20 (1990-2000)
+      */
+      if (current.beginYear! <= previous.beginYear!) {
+        return false;
+      }
+
+      /*
+      * RULE 6
+      *
+      * Volume numbering must progress forward as the years progress.
+      *
+      * This catches restarts:
+      *
+      *   v.1-10 (1980-1989)
+      *   v.1-8  (1990-1999)
+      */
+      if (current.beginVolume! <= previous.beginVolume!) {
+        return false;
+      }
+
+      /*
+      * RULE 7
+      *
+      * If the previous range has a closed end, make sure the next
+      * volume does not overlap it.
+      *
+      * Bad:
+      *
+      *   v.1-10  (1980-1989)
+      *   v.8-20  (1990-1999)
+      */
+      if (
+        previous.endVolume !== null &&
+        current.beginVolume! <= previous.endVolume
+      ) {
+        return false;
+      }
+
+      /*
+      * RULE 8
+      *
+      * A previous open-ended range cannot have anything after it.
+      */
+      if (previous.endYear === null) {
+        return false;
+      }
+
+      /*
+      * RULE 9
+      *
+      * Overlapping year ranges are unsafe for a single volume span.
+      *
+      * Bad:
+      *
+      *   v.1-10  (1980-1990)
+      *   v.11-20 (1989-1999)
+      */
+      if (current.beginYear! <= previous.endYear) {
+        return false;
+      }
+
+      /*
+      * RULE 10
+      *
+      * If years are directly contiguous, volumes should also be
+      * directly contiguous.
+      *
+      * Good:
+      *
+      *   v.1-10  (1980-1989)
+      *   v.11-20 (1990-1999)
+      *
+      * Bad:
+      *
+      *   v.1-10  (1980-1989)
+      *   v.15-20 (1990-1999)
+      *
+      * because volumes 11-14 have no demonstrated year mapping.
+      */
+      const yearsAreContiguous =
+        current.beginYear === previous.endYear + 1;
+
+      if (
+        yearsAreContiguous &&
+        previous.endVolume !== null &&
+        current.beginVolume !== previous.endVolume + 1
+      ) {
+        return false;
+      }
+
+      /*
+      * RULE 11
+      *
+      * Likewise, if volumes are directly contiguous but the years
+      * contain a gap, do not imply that they form one continuous
+      * year/volume range.
+      *
+      * Example:
+      *
+      *   v.1-10  (1980-1989)
+      *   v.11-20 (1995-2004)
+      */
+      const volumesAreContiguous =
+        previous.endVolume !== null &&
+        current.beginVolume === previous.endVolume + 1;
+
+      if (
+        volumesAreContiguous &&
+        current.beginYear !== previous.endYear + 1
+      ) {
+        return false;
+      }
+
+      /*
+      * RULE 12
+      *
+      * If this is a compression of multiple adjacent ranges,
+      * require the year and volume boundaries to tell the same story.
+      *
+      * In other words:
+      *
+      *   contiguous years <=> contiguous volumes
+      *
+      * A gap in both dimensions is acceptable because those ranges
+      * should normally not be merged by mergeIntervalsOptimized()
+      * anyway.
+      */
+      if (
+        yearsAreContiguous !== volumesAreContiguous
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  }
   private convertToDoclineRows(
     mergedRows: any[],
     choice: 'Electronic' | 'Print'
@@ -1327,8 +1614,8 @@ private rebuildHoldingsFromRanges(rows: any[]): any[] {
               serial_title: row['Title_x'],
               nlm_unique_id: row['NLM_Unique_ID'],
               holdings_format: holdingsFormat,
-              begin_volume: null,
-              end_volume: null,
+              begin_volume: pair.beginVolume,
+              end_volume: pair.endVolume,
               begin_year: pair.beginYear,
               end_year: pair.endYear,
               issns: this.hasValue(row['docline_issns_full'])
@@ -1430,7 +1717,7 @@ private rebuildHoldingsFromRanges(rows: any[]): any[] {
     return output;
   }
 
-private mergeIntervalsOptimized(rows: any[]): any[] {
+ private mergeIntervalsOptimized(rows: any[]): any[] {
   const clonedRows = rows.map((row: any) => this.cloneRow(row));
   const outputRows: any[] = [];
   const rangeGroups: { [key: string]: any[] } = {};
@@ -1522,10 +1809,31 @@ private mergeIntervalsOptimized(rows: any[]): any[] {
       collapsed['begin_year'] = earliestBeginYear;
       collapsed['end_year'] = '';
       collapsed['currently_received'] = 'Yes';
+      const keepVolumes =
+        this.volumeYearsAlign(groupRows);
 
-      collapsed['begin_volume'] = minPresent(
-        groupRows.map((row: any) => row['begin_volume'])
-      );
+      if (keepVolumes) {
+        const chronologicalRanges = groupRows
+          .slice()
+          .sort((a: any, b: any) =>
+            this.safeInt(a['begin_year'], 9999) -
+            this.safeInt(b['begin_year'], 9999)
+          );
+
+        const earliestRange = chronologicalRanges[0];
+
+        collapsed['begin_volume'] =
+          earliestRange['begin_volume'];
+
+        /*
+        * Open-ended year holdings should likewise remain
+        * open-ended in volume.
+        */
+        collapsed['end_volume'] = '';
+      } else {
+        collapsed['begin_volume'] = '';
+        collapsed['end_volume'] = '';
+      }
 
       collapsed['end_volume'] = '';
 
@@ -1575,12 +1883,17 @@ private mergeIntervalsOptimized(rows: any[]): any[] {
         return aKey.localeCompare(bKey);
       });
 
-    let currentRow: any = null;
-
-    sortedRanges.forEach((row: any) => {
+      let currentRow: any = null;
+      let sourceRanges: any[] = [];
+      sortedRanges.forEach((row: any) => {
       if (!currentRow) {
         currentRow = this.cloneRow(row);
         currentRow['_effective_end'] = effectiveEnd(currentRow);
+
+        sourceRanges = [
+          this.cloneRow(row)
+        ];
+
         return;
       }
 
@@ -1590,13 +1903,47 @@ private mergeIntervalsOptimized(rows: any[]): any[] {
         rowBeginYear <= currentEffectiveEnd + 1;
 
       if (!yearsOverlapOrTouch) {
+        const keepVolumes =
+          this.volumeYearsAlign(sourceRanges);
+
+        if (keepVolumes) {
+          const chronologicalRanges = sourceRanges
+            .slice()
+            .sort((a: any, b: any) =>
+              this.safeInt(a['begin_year'], 9999) -
+              this.safeInt(b['begin_year'], 9999)
+            );
+
+          const earliestRange = chronologicalRanges[0];
+          const latestRange =
+            chronologicalRanges[chronologicalRanges.length - 1];
+
+          currentRow['begin_volume'] =
+            earliestRange['begin_volume'];
+
+          currentRow['end_volume'] =
+            latestRange['end_volume'];
+        } else {
+          currentRow['begin_volume'] = '';
+          currentRow['end_volume'] = '';
+        }
+
         delete currentRow['_effective_end'];
+
         outputRows.push(currentRow);
 
         currentRow = this.cloneRow(row);
         currentRow['_effective_end'] = effectiveEnd(currentRow);
+
+        sourceRanges = [
+          this.cloneRow(row)
+        ];
+
         return;
       }
+      sourceRanges.push(
+    this.cloneRow(row)
+  );
 
       currentRow['issns'] = mergeIssns(currentRow['issns'], row['issns']);
 
@@ -1635,12 +1982,38 @@ private mergeIntervalsOptimized(rows: any[]): any[] {
         }
       }
     });
-
     if (currentRow) {
+      const keepVolumes =
+        this.volumeYearsAlign(sourceRanges);
+
+      if (keepVolumes) {
+        const chronologicalRanges = sourceRanges
+          .slice()
+          .sort((a: any, b: any) =>
+            this.safeInt(a['begin_year'], 9999) -
+            this.safeInt(b['begin_year'], 9999)
+          );
+
+        const earliestRange = chronologicalRanges[0];
+        const latestRange =
+          chronologicalRanges[chronologicalRanges.length - 1];
+
+        currentRow['begin_volume'] =
+          earliestRange['begin_volume'];
+
+        currentRow['end_volume'] =
+          latestRange['end_volume'];
+      } else {
+        currentRow['begin_volume'] = '';
+        currentRow['end_volume'] = '';
+      }
+
       delete currentRow['_effective_end'];
-      currentRow['currently_received'] = this.hasValue(currentRow['end_year'])
-        ? 'No'
-        : 'Yes';
+
+      currentRow['currently_received'] =
+        this.hasValue(currentRow['end_year'])
+          ? 'No'
+          : 'Yes';
 
       outputRows.push(currentRow);
     }
